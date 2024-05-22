@@ -87,6 +87,7 @@ func (this *Tree) isDescendant(node1, node2 *treeNode) bool {
 	this.mtx.RLock()
 	defer this.mtx.RUnlock()
 	if node2 == this.root {return true}
+	if node1 == this.root {return false}
 	var curr *treeNode = node1
 	for {
 		if curr == this.root {
@@ -104,7 +105,41 @@ func (this *Tree) isDescendant(node1, node2 *treeNode) bool {
 func (this *Tree) getNode(path []string) *treeNode {
 	this.mtx.RLock()
 	defer this.mtx.RUnlock()
+	var curr *treeNode = this.root
+    if path[0] == "." || path[0] == ".." {
+		curr = this.current
+	}
 
+
+	for i, dir := range path {
+        fmt.Println("Processing directory:", dir)
+		if dir == "." {
+			if i == len(path)-1{
+				return curr
+			}
+			continue
+		}
+
+		if dir == ".." {
+			if curr.parent == nil {return nil}
+			curr = curr.parent
+			if i == len(path)-1{
+				return curr
+			}
+			continue
+		}
+
+		for _, child := range curr.children {
+			if child.name == dir {
+				curr = child
+				if i == len(path)-1{
+					return curr
+				}
+				break
+			}
+		}
+    }
+	return nil
 }
 
 // cambiar el puntero de posicion
