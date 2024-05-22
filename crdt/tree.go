@@ -86,7 +86,18 @@ func (this *Tree) handleConnection(conn net.Conn) {
 func (this *Tree) isDescendant(node1, node2 *treeNode) bool {
 	this.mtx.RLock()
 	defer this.mtx.RUnlock()
-
+	if node2 == this.root {return true}
+	var curr *treeNode = node1
+	for {
+		if curr == this.root {
+			break
+		}
+		if node2 == curr.parent {
+			return true
+		}
+		curr = curr.parent
+	}
+	return false
 }
 
 // dar el puntero que corresponde al path o dar nulo si no existe
