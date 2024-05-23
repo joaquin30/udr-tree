@@ -10,7 +10,7 @@ type Replica struct {
 	queue     *queue.Queue
 	conn      net.Conn
 	closed    bool
-	Connected bool
+	connected bool
 }
 
 func NewReplica(serverIP string) *Replica {
@@ -44,7 +44,7 @@ func updateReplica(replica *Replica) {
 	for {
 		if replica.closed {
 			break
-		} else if !replica.Connected || replica.queue.Len() == 0 {
+		} else if !replica.connected || replica.queue.Len() == 0 {
 			continue
 		}
 		_, err := replica.conn.Write(replica.queue.Front().([]byte))
