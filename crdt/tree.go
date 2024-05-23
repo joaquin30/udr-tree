@@ -30,7 +30,7 @@ type Tree struct {
 	mtx                  sync.RWMutex
 }
 
-func NewTree(port, replicaIPs []string) *Tree {
+func NewTree(port string, replicaIPs []string) *Tree {
 	tree := Tree{}
 	rootID, _ := uuid.FromString(rootUUID)
 	trashID, _ := uuid.FromString(trashUUID)
@@ -164,7 +164,7 @@ func (this *Tree) Add(name string, parent []string) error {
 }
 
 // mv ./asd ../asda/as asd2
-func (this *Tree) Move(node, newParent []string, newName string) error {
+func (this *Tree) Move(node string, newParent []string, newName string) error {
 
 }
 

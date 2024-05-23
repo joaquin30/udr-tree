@@ -1,7 +1,7 @@
 package main
 
 import (
-	"udr-tree/replica"
+	"udr-tree/crdt"
 	"log"
 	"os"
 	"bufio"
@@ -35,9 +35,10 @@ func main() {
 	- quit: salir de la app
 	- help: mostrar este mensaje
 	`
+	args := os.Args
 	// os.argv[1]: puerto propio
 	// os.argv[2:]: array de "ip:port" de las replicas
-	tree := crdt.NewTree(os.argv[1], os.argv[2:])
+	tree := crdt.NewTree(args[1], args[2:])
 
 	// para leer linea por linea
 	// aca validar entrada del usuario y ejecutar operaciones
@@ -52,36 +53,36 @@ func main() {
 		switch cmd[0] {
 			case "cd":
 				if isValidPath(cmd[1]) {
-					err = tree.ChangeDir(cmd[1])
+					err = tree.ChangeDir(strings.Split(cmd[1], "/"))
 				} else {
 					err = errors.New("Invalid path")
 				}
 			case "add":
 				if isValidName(cmd[1]) && isValidPath(cmd[2]) {
-					err = tree.Add(cmd[1], cmd[2])
+					err = tree.Add(cmd[1], strings.Split(cmd[2], "/"))
 				} else {
 					err = errors.New("Invalid name or path")
 				}
 			case "rm":
 				if isValidPath(cmd[1]) {
-					err = tree.Delete(cmd[1])
+					err = tree.Remove(strings.Split(cmd[1], "/"))
 				} else {
 					err = errors.New("Invalid path")
 				}
 			case "mv":
 				if isValidPath(cmd[1]) && isValidPath(cmd[2]) && isValidName(cmd[3]) {
-					err = tree.Move(cmd[1], cmd[2], cmd[3]) // tree.Move(node, parent)
+					err = tree.Move(cmd[1], strings.Split(cmd[2], "/"), cmd[3]) // tree.Move(node, parent)
 				} else {
 					err = errors.New("Invalid path or name")
 				}
 			case "print":
-				err = tree.Print()
+				tree.Print()
 			case "connect":
-				err = tree.Connect()
+				tree.Connect()
 			case "disconnect":
-				err = tree.Disconnect()
+				tree.Disconnect()
 			case "quit":
-				err = tree.Close()
+				tree.Close()
 				os.Exit(0)
 			case "help":
 				log.Println(helpMessage)
