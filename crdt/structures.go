@@ -1,8 +1,8 @@
 package crdt
 
 import (
-	"github.com/google/uuid"
 	"sync"
+	"github.com/google/uuid"
 )
 
 type LamportClock struct {
@@ -14,7 +14,7 @@ type LamportClock struct {
 func (this *LamportClock) Sync(time uint64) {
 	this.Lock()
 	defer this.Unlock()
-
+	
 	if time >= this.time {
 		this.time = time + 1
 	}
@@ -23,7 +23,7 @@ func (this *LamportClock) Sync(time uint64) {
 func (this *LamportClock) Now() uint64 {
 	this.Lock()
 	defer this.Unlock()
-
+	
 	now := this.time
 	this.time += 1
 	return now
@@ -61,6 +61,6 @@ func (this LogMove) Before(log LogMove) bool {
 	if this.Timestamp == this.Timestamp {
 		return this.ReplicaID.String() < log.ReplicaID.String()
 	}
-
+	
 	return this.Timestamp < log.Timestamp
 }

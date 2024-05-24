@@ -32,27 +32,28 @@ type Tree struct {
 }
 
 func NewTree(port string, replicaIPs []string) *Tree {
-	tree := Tree{}
+	tree := Tree{nodes: make(map[uuid.UUID]*treeNode)}
 
 	tree.nodes[rootID] = &treeNode{
 		id:       rootID,
 		name:     "root",
 		parent:   nil,
-		children: nil,
+		children: make([]*treeNode, 0),
 	}
 	tree.root = tree.nodes[rootID]
 
 	tree.nodes[trashID] = &treeNode{
 		id:       trashID,
-		name:     ".trash",
-		parent:   tree.root,
-		children: []*treeNode{tree.root},
+		name:     "trash",
+		parent:   nil,
+		children: make([]*treeNode, 0),
 	}
 	tree.trash = tree.nodes[trashID]
 
 	tree.current = tree.root
 	tree.closed = false
 	tree.clock = LamportClock{ID: uuid.New(), time: 0}
+	tree.history = nil
 
 	go tree.listen(port)
 	time.Sleep(5 * time.Second) // para que las demas replicas inicien
@@ -107,22 +108,28 @@ func (this *Tree) handleConnection(conn net.Conn) {
 func (this *Tree) isDescendant(node1, node2 *treeNode) bool {
 	this.RLock()
 	defer this.RUnlock()
+	
 	if node2 == this.root {
 		return true
 	}
+	
 	if node1 == this.root {
 		return false
 	}
+	
 	var curr *treeNode = node1
 	for {
 		if curr == this.root {
 			break
 		}
+		
 		if node2 == curr.parent {
 			return true
 		}
+		
 		curr = curr.parent
 	}
+	
 	return false
 }
 
@@ -130,17 +137,18 @@ func (this *Tree) isDescendant(node1, node2 *treeNode) bool {
 func (this *Tree) getNode(path []string) *treeNode {
 	this.RLock()
 	defer this.RUnlock()
-	var curr *treeNode = this.root
-	if path[0] == "." || path[0] == ".." {
-		curr = this.current
+	
+	curr := this.current
+	if len(path[0]) == 0 {
+		curr = this.root
 	}
 
-	for i, dir := range path {
-		fmt.Println("Processing directory:", dir)
+	for _, dir := range path {
+		if len(dir) == 0 {
+			continue
+		}
+		
 		if dir == "." {
-			if i == len(path)-1 {
-				return curr
-			}
 			continue
 		}
 
@@ -148,30 +156,40 @@ func (this *Tree) getNode(path []string) *treeNode {
 			if curr.parent == nil {
 				return nil
 			}
+			
 			curr = curr.parent
-			if i == len(path)-1 {
-				return curr
-			}
 			continue
 		}
 
+		find := false
 		for _, child := range curr.children {
 			if child.name == dir {
 				curr = child
-				if i == len(path)-1 {
-					return curr
-				}
+				find = true
 				break
 			}
 		}
+
+		if !find {
+			return nil
+		}
 	}
-	return nil
+	
+	return curr
 }
 
 // cambiar el puntero de posicion
 // solo es llamado por apply
 func (this *Tree) movePtr(node, newParent *treeNode) {
-
+	for i, child := range node.parent.children {
+		if child == node {
+			node.parent.children[i] = node.parent.children[len(node.parent.children)-1]
+			node.parent.children = node.parent.children[:len(node.parent.children)-1]
+		}
+	}
+	
+	node.parent = newParent
+	newParent.children = append(newParent.children, node)
 }
 
 // aplicar la operacion move
@@ -202,8 +220,9 @@ func (this *Tree) Apply(move Move) {
 			id:       move.Node,
 			name:     move.NewName,
 			parent:   this.nodes[move.NewParent],
-			children: nil,
+			children: make([]*treeNode, 0),
 		}
+		this.nodes[move.NewParent].children = append(this.nodes[move.NewParent].children, this.nodes[move.Node])
 		this.history[i].OldParent = nilID
 		this.history[i].OldName = ""
 	} else {
@@ -211,8 +230,9 @@ func (this *Tree) Apply(move Move) {
 		this.history[i].OldParent = nodePtr.parent.id
 		this.history[i].OldName = nodePtr.name
 		this.movePtr(nodePtr, this.nodes[move.NewParent])
+		nodePtr.name = move.NewName
 	}
-
+	
 	i += 1
 	for i < len(this.history) {
 		this.reapply(i)
@@ -248,7 +268,7 @@ func (this *Tree) reapply(i int) {
 func (this *Tree) Add(name string, parent []string) error {
 	parentPtr := this.getNode(parent)
 	if parentPtr == nil {
-		return errors.New("Parent path does not exist")
+		return errors.New("Path does not exist")
 	}
 
 	op := Move{
@@ -276,6 +296,14 @@ func (this *Tree) Move(node, newParent []string, newName string) error {
 	if parentPtr == nil {
 		return errors.New("Parent path does not exist")
 	}
+	
+	if nodePtr == this.root {
+		return errors.New("Cannot move root")
+	}
+	
+	if this.isDescendant(parentPtr, nodePtr) {
+		return errors.New("Cannot move node to its decendants")
+	}
 
 	op := Move{
 		ReplicaID: this.clock.ID,
@@ -295,7 +323,11 @@ func (this *Tree) Move(node, newParent []string, newName string) error {
 func (this *Tree) Remove(node []string) error {
 	nodePtr := this.getNode(node)
 	if nodePtr == nil {
-		return errors.New("Node path does not exist")
+		return errors.New("Path does not exist")
+	}
+	
+	if nodePtr == this.root {
+		return errors.New("Cannot remove root")
 	}
 
 	op := Move{
@@ -316,6 +348,12 @@ func (this *Tree) Remove(node []string) error {
 // cambiar current_node a la path si existe
 // cd ./../asd
 func (this *Tree) ChangeDir(path []string) error {
+	node := this.getNode(path);
+	if node == nil {
+		return errors.New("Path does not exist")
+	}
+	
+	this.current = node
 	return nil
 }
 
@@ -323,8 +361,25 @@ func (this *Tree) ChangeDir(path []string) error {
 func (this *Tree) Print() {
 	this.RLock()
 	defer this.RUnlock()
-
+	
+	printNode(this.root, 0)
 }
+
+func printNode(node *treeNode, level int) {
+	for i := 0; i < level-1; i += 1 {
+		fmt.Print("|  ")
+	}
+	
+	if level > 0 {
+		fmt.Print("|--")
+	}
+	
+	fmt.Println(node.name)
+	for _, child := range node.children {
+		printNode(child, level + 1)
+	}
+}
+
 
 func (this *Tree) Disconnect() {
 	for i := range this.replicas {
