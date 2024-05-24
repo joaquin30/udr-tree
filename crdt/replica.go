@@ -1,13 +1,13 @@
-package net
+package crdt
 
 import (
+	"github.com/enriquebris/goconcurrentqueue"
 	"log"
 	"net"
-	"udr-tree/queue"
 )
 
 type Replica struct {
-	queue     *queue.Queue
+	queue     *goconcurrentqueue.FIFO
 	conn      net.Conn
 	closed    bool
 	connected bool
@@ -18,38 +18,36 @@ func NewReplica(serverIP string) *Replica {
 	if err != nil {
 		log.Fatal(err)
 	}
+
 	replica := Replica{
-		queue:     queue.New(),
+		queue:     goconcurrentqueue.NewFIFO(),
 		conn:      conn,
 		connected: true,
 		closed:    false,
 	}
-	go updateReplica(&replica)
+
+	go replica.update()
 	return &replica
 }
 
-func (this *Replica) Send(move string) {
-	this.queue.PushBack(move)
+func (this *Replica) Send(move Move) {
+	this.queue.Enqueue(MoveToBytes(move))
 }
 
 func (this *Replica) Close() {
 	this.closed = true
-	err := this.conn.Close()
-	if err != nil {
-		log.Fatal(err)
-	}
+	this.conn.Close()
 }
 
-func updateReplica(replica *Replica) {
+func (this *Replica) update() {
 	for {
-		if replica.closed {
+		if this.closed {
 			break
-		} else if !replica.connected || replica.queue.Len() == 0 {
+		} else if !this.connected {
 			continue
 		}
-		_, err := replica.conn.Write(replica.queue.Front().([]byte))
-		if err == nil {
-			replica.queue.PopFront()
-		}
+
+		item, _ := this.queue.DequeueOrWaitForNextElement()
+		this.conn.Write(item.([]byte))
 	}
 }

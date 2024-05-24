@@ -2,27 +2,36 @@ package crdt
 
 import (
 	"github.com/google/uuid"
+	"sync"
 )
 
 type LamportClock struct {
-	id   uuid.UUID
+	sync.Mutex
+	ID   uuid.UUID
 	time uint64
 }
 
-func (this *LamportClock) Sync(clock LamportClock) {
-	if clock.time >= this.time {
-		this.time = clock.time + 1
+func (this *LamportClock) Sync(time uint64) {
+	this.Lock()
+	defer this.Unlock()
+
+	if time >= this.time {
+		this.time = time + 1
 	}
 }
 
-func (this *LamportClock) Now(clock LamportClock) LamportClock {
-	ret := *this
+func (this *LamportClock) Now() uint64 {
+	this.Lock()
+	defer this.Unlock()
+
+	now := this.time
 	this.time += 1
-	return ret
+	return now
 }
 
 type Move struct {
-	Timestamp LamportClock
+	ReplicaID uuid.UUID
+	Timestamp uint64
 	NewParent uuid.UUID
 	NewName   string
 	Node      uuid.UUID
@@ -31,18 +40,27 @@ type Move struct {
 // definir estructura de los bytes
 
 func MoveFromBytes(data []byte) Move {
-
+	return Move{}
 }
 
 func MoveToBytes(move Move) []byte {
-
+	return make([]byte, 0)
 }
 
 type LogMove struct {
-	Timestamp LamportClock
-	OldParent *uuid.UUID
-	OldName   *string
+	ReplicaID uuid.UUID
+	Timestamp uint64
+	OldParent uuid.UUID
+	OldName   string
 	NewParent uuid.UUID
 	NewName   string
-	Node      UUID
+	Node      uuid.UUID
+}
+
+func (this LogMove) Before(log LogMove) bool {
+	if this.Timestamp == this.Timestamp {
+		return this.ReplicaID.String() < log.ReplicaID.String()
+	}
+
+	return this.Timestamp < log.Timestamp
 }

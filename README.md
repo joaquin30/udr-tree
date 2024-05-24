@@ -7,4 +7,4 @@ Link: <https://martin.kleppmann.com/2021/10/07/crdt-tree-move-operation.html>
 ## Dependencies
 
 - <https://github.com/google/uuid>
-- <https://github.com/phf/go-queue>
+- <https://github.com/cameron314/concurrentqueue>

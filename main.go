@@ -1,13 +1,13 @@
 package main
 
 import (
-	"udr-tree/crdt"
+	"bufio"
+	"errors"
 	"log"
 	"os"
-	"bufio"
-	"strings"
 	"regexp"
-	"errors"
+	"strings"
+	"udr-tree/crdt"
 )
 
 func isValidName(name string) bool {
@@ -47,47 +47,47 @@ func main() {
 	for scanner.Scan() {
 		// cmd es un array de strings separados por espacios
 		cmd := strings.Fields(scanner.Text())
-		
+
 		// manejar los comandos, imprimir errores
 		var err error
 		switch cmd[0] {
-			case "cd":
-				if isValidPath(cmd[1]) {
-					err = tree.ChangeDir(strings.Split(cmd[1], "/"))
-				} else {
-					err = errors.New("Invalid path")
-				}
-			case "add":
-				if isValidName(cmd[1]) && isValidPath(cmd[2]) {
-					err = tree.Add(cmd[1], strings.Split(cmd[2], "/"))
-				} else {
-					err = errors.New("Invalid name or path")
-				}
-			case "rm":
-				if isValidPath(cmd[1]) {
-					err = tree.Remove(strings.Split(cmd[1], "/"))
-				} else {
-					err = errors.New("Invalid path")
-				}
-			case "mv":
-				if isValidPath(cmd[1]) && isValidPath(cmd[2]) && isValidName(cmd[3]) {
-					err = tree.Move(cmd[1], strings.Split(cmd[2], "/"), cmd[3]) // tree.Move(node, parent)
-				} else {
-					err = errors.New("Invalid path or name")
-				}
-			case "print":
-				tree.Print()
-			case "connect":
-				tree.Connect()
-			case "disconnect":
-				tree.Disconnect()
-			case "quit":
-				tree.Close()
-				os.Exit(0)
-			case "help":
-				log.Println(helpMessage)
-			default:
-				err = errors.New("Command not found")
+		case "cd":
+			if isValidPath(cmd[1]) {
+				err = tree.ChangeDir(strings.Split(cmd[1], "/"))
+			} else {
+				err = errors.New("Invalid path")
+			}
+		case "add":
+			if isValidName(cmd[1]) && isValidPath(cmd[2]) {
+				err = tree.Add(cmd[1], strings.Split(cmd[2], "/"))
+			} else {
+				err = errors.New("Invalid name or path")
+			}
+		case "rm":
+			if isValidPath(cmd[1]) {
+				err = tree.Remove(strings.Split(cmd[1], "/"))
+			} else {
+				err = errors.New("Invalid path")
+			}
+		case "mv":
+			if isValidPath(cmd[1]) && isValidPath(cmd[2]) && isValidName(cmd[3]) {
+				err = tree.Move(strings.Split(cmd[1], "/"), strings.Split(cmd[2], "/"), cmd[3])
+			} else {
+				err = errors.New("Invalid path or name")
+			}
+		case "print":
+			tree.Print()
+		case "connect":
+			tree.Connect()
+		case "disconnect":
+			tree.Disconnect()
+		case "quit":
+			tree.Close()
+			os.Exit(0)
+		case "help":
+			log.Println(helpMessage)
+		default:
+			err = errors.New("Command not found")
 		}
 
 		if err != nil {
