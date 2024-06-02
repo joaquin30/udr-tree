@@ -1,16 +1,18 @@
 package crdt
 
 import (
-	"github.com/enriquebris/goconcurrentqueue"
 	"log"
 	"net"
+	"time"
+	"sync"
 )
 
 type Replica struct {
-	queue     *goconcurrentqueue.FIFO
-	conn      net.Conn
-	closed    bool
+	queue     chan []byte
+	exit      chan bool
 	connected bool
+	conn      net.Conn
+	wg        sync.WaitGroup
 }
 
 func NewReplica(serverIP string) *Replica {
@@ -20,34 +22,63 @@ func NewReplica(serverIP string) *Replica {
 	}
 
 	replica := Replica{
-		queue:     goconcurrentqueue.NewFIFO(),
-		conn:      conn,
+		queue:     make(chan []byte, 4096),
+		exit:      make(chan bool),
 		connected: true,
-		closed:    false,
+		conn:      conn,
 	}
-
+	replica.wg.Add(1)
 	go replica.update()
 	return &replica
 }
 
 func (this *Replica) Send(move Move) {
-	this.queue.Enqueue(MoveToBytes(move))
+	this.queue <- MoveToBytes(move)
+}
+
+func (this *Replica) Disconnect() {
+	if this.connected {
+		this.connected = false
+		this.exit <- false
+	}
+}
+
+func (this *Replica) Connect() {
+	if !this.connected {
+		this.connected = true
+		go this.update()
+	}
 }
 
 func (this *Replica) Close() {
-	this.closed = true
+	this.Connect()
+	close(this.queue)
+	this.wg.Wait()
+	close(this.exit)
 	this.conn.Close()
 }
 
 func (this *Replica) update() {
 	for {
-		if this.closed {
-			break
-		} else if !this.connected {
-			continue
-		}
+		select {
+		case msg, ok := <-this.queue:
+			if !ok {
+				this.wg.Done()
+				return
+			}
+			
+			// log.Println("SEND:", string(msg))
+			_, err := this.conn.Write(msg)
+			if err != nil {
+				this.wg.Done()
+				return
+			}
+			
+			// para evitar errores con tcp
+			time.Sleep(10*time.Millisecond)
 
-		item, _ := this.queue.DequeueOrWaitForNextElement()
-		this.conn.Write(item.([]byte))
+		case <-this.exit:
+			return
+		}
 	}
 }

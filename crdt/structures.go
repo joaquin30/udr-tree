@@ -1,66 +1,53 @@
 package crdt
 
 import (
-	"sync"
-	"github.com/google/uuid"
+	"log"
+	"time"
+	"encoding/json"
 )
 
-type LamportClock struct {
-	sync.Mutex
-	ID   uuid.UUID
-	time uint64
-}
-
-func (this *LamportClock) Sync(time uint64) {
-	this.Lock()
-	defer this.Unlock()
-	
-	if time >= this.time {
-		this.time = time + 1
-	}
-}
-
-func (this *LamportClock) Now() uint64 {
-	this.Lock()
-	defer this.Unlock()
-	
-	now := this.time
-	this.time += 1
-	return now
-}
-
 type Move struct {
-	ReplicaID uuid.UUID
+	ReplicaID uint64
 	Timestamp uint64
-	NewParent uuid.UUID
-	NewName   string
-	Node      uuid.UUID
+	NewParent string
+	Node      string
+	Time 	  time.Time
 }
 
 // definir estructura de los bytes
 
 func MoveFromBytes(data []byte) Move {
-	return Move{}
+	var move Move
+	err := json.Unmarshal(data, &move)
+	if err != nil {
+		log.Fatal(err)
+	}
+	
+	return move
 }
 
 func MoveToBytes(move Move) []byte {
-	return make([]byte, 0)
+	bin, err := json.Marshal(move)
+	if err != nil {
+		log.Fatal(err)
+	}
+	
+	return bin
 }
 
 type LogMove struct {
-	ReplicaID uuid.UUID
+	ReplicaID uint64
 	Timestamp uint64
-	OldParent uuid.UUID
-	OldName   string
-	NewParent uuid.UUID
-	NewName   string
-	Node      uuid.UUID
+	OldParent string
+	NewParent string
+	Node      string
+	ignored   bool
 }
 
-func (this LogMove) Before(log LogMove) bool {
-	if this.Timestamp == this.Timestamp {
-		return this.ReplicaID.String() < log.ReplicaID.String()
+func LogMoveBefore(log1, log2 LogMove) bool {
+	if log1.Timestamp == log2.Timestamp {
+		return log1.ReplicaID < log2.ReplicaID
 	}
-	
-	return this.Timestamp < log.Timestamp
+
+	return log1.Timestamp < log2.Timestamp
 }

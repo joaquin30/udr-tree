@@ -3,40 +3,49 @@ package crdt
 import (
 	"errors"
 	"fmt"
-	"github.com/google/uuid"
 	"log"
 	"net"
+	"sort"
 	"sync"
 	"time"
+	"os"
+	"strconv"
 )
 
-var rootID, _ = uuid.Parse("4b16e69d-80e4-446e-bdd1-bd838d021718")
-var trashID, _ = uuid.Parse("1f8535a6-e1dc-4256-8b60-c7cfe509993f")
-var nilID, _ = uuid.Parse("00000000-0000-0000-0000-000000000000")
+const (
+	rootID  = "root"
+	trashID = "trash"
+	nilID   = ""
+)
 
 type treeNode struct {
-	id       uuid.UUID
-	name     string
+	id       string
 	parent   *treeNode
 	children []*treeNode
 }
 
 type Tree struct {
-	sync.RWMutex
-	nodes                map[uuid.UUID]*treeNode
-	history              []LogMove
-	root, trash, current *treeNode
-	replicas             []*Replica
-	closed               bool
-	clock                LamportClock
+	sync.Mutex
+	id, time    uint64
+	Counter     uint64
+	server      uint64
+	replicas    []*Replica
+	nodes       map[string]*treeNode
+	history     []LogMove
+	root, trash *treeNode
+	current     *treeNode
+	file        *os.File
 }
 
-func NewTree(port string, replicaIPs []string) *Tree {
-	tree := Tree{nodes: make(map[uuid.UUID]*treeNode)}
+func NewTree(id uint64, port string, replicaIPs []string) *Tree {
+	tree := Tree{}
+	tree.id = id
+	tree.time = 0
+	tree.nodes = make(map[string]*treeNode)
+	tree.history = make([]LogMove, 0)
 
 	tree.nodes[rootID] = &treeNode{
 		id:       rootID,
-		name:     "root",
 		parent:   nil,
 		children: make([]*treeNode, 0),
 	}
@@ -44,16 +53,16 @@ func NewTree(port string, replicaIPs []string) *Tree {
 
 	tree.nodes[trashID] = &treeNode{
 		id:       trashID,
-		name:     "trash",
 		parent:   nil,
 		children: make([]*treeNode, 0),
 	}
 	tree.trash = tree.nodes[trashID]
-
 	tree.current = tree.root
-	tree.closed = false
-	tree.clock = LamportClock{ID: uuid.New(), time: 0}
-	tree.history = nil
+	f, err := os.Create("time"+strconv.Itoa(int(id))+".txt")
+	if err != nil {
+		log.Fatal(err)
+	}
+	tree.file = f
 
 	go tree.listen(port)
 	time.Sleep(5 * time.Second) // para que las demas replicas inicien
@@ -68,20 +77,14 @@ func NewTree(port string, replicaIPs []string) *Tree {
 
 func (this *Tree) listen(port string) {
 	ln, err := net.Listen("tcp", ":"+port)
-	defer ln.Close()
-
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	for {
-		if this.closed {
-			break
-		}
-
 		conn, err := ln.Accept()
 		if err != nil {
-			log.Fatal(err)
+			return
 		}
 
 		go this.handleConnection(conn)
@@ -91,310 +94,252 @@ func (this *Tree) listen(port string) {
 func (this *Tree) handleConnection(conn net.Conn) {
 	defer conn.Close()
 
-	var buffer [256]byte
+	var buffer [2048]byte
 	for {
-		if this.closed {
+		sz, err := conn.Read(buffer[:])
+		if err != nil || sz == 0 {
 			break
 		}
 
-		sz, _ := conn.Read(buffer[:])
-		op := MoveFromBytes(buffer[:sz])
-		this.clock.Sync(op.Timestamp)
-		this.Apply(op)
+		// log.Println("RECV:", string(buffer[:sz]))
+		go this.applyRecvMove(MoveFromBytes(buffer[:sz]))
 	}
+}
+
+func (this *Tree) applyRecvMove(op Move) {
+	this.Lock()
+	defer this.Unlock()
+
+	if this.time < op.Timestamp+1 {
+		this.time = op.Timestamp + 1
+	}
+
+	this.apply(op, false)
 }
 
 // checkear si node1 es descendiente de node2
 func (this *Tree) isDescendant(node1, node2 *treeNode) bool {
-	this.RLock()
-	defer this.RUnlock()
-	
-	if node2 == this.root {
-		return true
-	}
-	
-	if node1 == this.root {
-		return false
-	}
-	
-	var curr *treeNode = node1
-	for {
-		if curr == this.root {
-			break
-		}
-		
-		if node2 == curr.parent {
+	curr := node1
+	for curr != nil {
+		if curr == node2 {
 			return true
+		} else {
+			curr = curr.parent
 		}
-		
-		curr = curr.parent
 	}
-	
+
 	return false
 }
 
-// dar el puntero que corresponde al path o dar nulo si no existe
-func (this *Tree) getNode(path []string) *treeNode {
-	this.RLock()
-	defer this.RUnlock()
-	
-	curr := this.current
-	if len(path[0]) == 0 {
-		curr = this.root
-	}
-
-	for _, dir := range path {
-		if len(dir) == 0 {
-			continue
-		}
-		
-		if dir == "." {
-			continue
-		}
-
-		if dir == ".." {
-			if curr.parent == nil {
-				return nil
-			}
-			
-			curr = curr.parent
-			continue
-		}
-
-		find := false
-		for _, child := range curr.children {
-			if child.name == dir {
-				curr = child
-				find = true
-				break
-			}
-		}
-
-		if !find {
-			return nil
-		}
-	}
-	
-	return curr
-}
-
 // cambiar el puntero de posicion
-// solo es llamado por apply
 func (this *Tree) movePtr(node, newParent *treeNode) {
-	for i, child := range node.parent.children {
-		if child == node {
-			node.parent.children[i] = node.parent.children[len(node.parent.children)-1]
-			node.parent.children = node.parent.children[:len(node.parent.children)-1]
+	if node.parent != nil {
+		for i, child := range node.parent.children {
+			if child == node {
+				node.parent.children[i] = node.parent.children[len(node.parent.children)-1]
+				node.parent.children = node.parent.children[:len(node.parent.children)-1]
+			}
 		}
 	}
-	
+
 	node.parent = newParent
-	newParent.children = append(newParent.children, node)
+	if newParent != nil {
+		newParent.children = append(newParent.children, node)
+	}
 }
 
 // aplicar la operacion move
 // aca esta la magia, debe revertir ops del historial, aplicar la nueva op
 // guardar la nueva op en el historial y reaplicar las ops del historial
 // ignorando las ops invalidas
-func (this *Tree) Apply(move Move) {
-	this.Lock()
-	defer this.Unlock()
-
+func (this *Tree) apply(move Move, send bool) {
+	//~ fmt.Println(1)
 	this.history = append(this.history, LogMove{
 		ReplicaID: move.ReplicaID,
 		Timestamp: move.Timestamp,
 		NewParent: move.NewParent,
-		NewName:   move.NewName,
 		Node:      move.Node,
 	})
 	i := len(this.history) - 1
-	for i > 0 && this.history[i].Before(this.history[i-1]) {
+	for i > 0 && LogMoveBefore(this.history[i], this.history[i-1]) {
 		this.history[i], this.history[i-1] = this.history[i-1], this.history[i]
 		this.revert(i)
 		i -= 1
 	}
 
+	//~ fmt.Println(2)
 	_, ok := this.nodes[move.Node]
 	if !ok {
 		this.nodes[move.Node] = &treeNode{
 			id:       move.Node,
-			name:     move.NewName,
-			parent:   this.nodes[move.NewParent],
+			parent:   nil,
 			children: make([]*treeNode, 0),
 		}
-		this.nodes[move.NewParent].children = append(this.nodes[move.NewParent].children, this.nodes[move.Node])
-		this.history[i].OldParent = nilID
-		this.history[i].OldName = ""
-	} else {
-		nodePtr := this.nodes[move.Node]
-		this.history[i].OldParent = nodePtr.parent.id
-		this.history[i].OldName = nodePtr.name
-		this.movePtr(nodePtr, this.nodes[move.NewParent])
-		nodePtr.name = move.NewName
 	}
-	
-	i += 1
+
+	//~ fmt.Println(3)
 	for i < len(this.history) {
 		this.reapply(i)
+		i += 1
 	}
+
+	//~ fmt.Println(4)
+	if send {
+		for i := range this.replicas {
+			this.replicas[i].Send(move)
+		}
+	}
+
+	//~ fmt.Println(5)
+	this.time += 1
+	this.Counter += 1
+	this.file.WriteString(string(time.Now().Sub(move.Time).String())+"\n")
 }
 
+// revierte un logmove si no ha sido ignorado
 func (this *Tree) revert(i int) {
+	if this.history[i].ignored {
+		return
+	}
+
 	nodePtr := this.nodes[this.history[i].Node]
 	if this.history[i].OldParent == nilID {
 		this.movePtr(nodePtr, nil)
 	} else {
 		parentPtr := this.nodes[this.history[i].OldParent]
 		this.movePtr(nodePtr, parentPtr)
-		nodePtr.name = this.history[i].OldName
 	}
 }
 
+// reaplica un logmove o lo ignora
 func (this *Tree) reapply(i int) {
 	nodePtr := this.nodes[this.history[i].Node]
-	if nodePtr.parent.id == nilID {
+	parentPtr, ok := this.nodes[this.history[i].NewParent]
+	this.history[i].ignored = !ok || this.isDescendant(parentPtr, nodePtr)
+	if this.history[i].ignored {
+		return
+	}
+
+	if nodePtr.parent == nil {
 		this.history[i].OldParent = nilID
-		this.history[i].OldName = ""
 	} else {
 		this.history[i].OldParent = nodePtr.parent.id
-		this.history[i].OldName = nodePtr.name
 	}
 
-	parentPtr := this.nodes[this.history[i].NewParent]
 	this.movePtr(nodePtr, parentPtr)
-	nodePtr.name = this.history[i].NewName
 }
 
-func (this *Tree) Add(name string, parent []string) error {
-	parentPtr := this.getNode(parent)
-	if parentPtr == nil {
-		return errors.New("Path does not exist")
+func (this *Tree) Add(name, parent string) error {
+	this.Lock()
+	defer this.Unlock()
+
+	if _, ok := this.nodes[name]; ok {
+		return errors.New("Name already exists")
+	}
+
+	parentPtr, ok := this.nodes[parent]
+	if !ok {
+		return errors.New("Parent does not exist")
 	}
 
 	op := Move{
-		ReplicaID: this.clock.ID,
-		Timestamp: this.clock.Now(),
+		ReplicaID: this.id,
+		Timestamp: this.time,
 		NewParent: parentPtr.id,
-		NewName:   name,
-		Node:      uuid.New(),
+		Node:      name,
+		Time:      time.Now(),
 	}
-	this.Apply(op)
-	for i := range this.replicas {
-		this.replicas[i].Send(op)
-	}
-
+	this.apply(op, true)
 	return nil
 }
 
-func (this *Tree) Move(node, newParent []string, newName string) error {
-	nodePtr := this.getNode(node)
-	parentPtr := this.getNode(newParent)
-	if nodePtr == nil {
-		return errors.New("Node path does not exist")
-	}
+func (this *Tree) Move(node, newParent string) error {
+	this.Lock()
+	defer this.Unlock()
 
-	if parentPtr == nil {
-		return errors.New("Parent path does not exist")
-	}
-	
-	if nodePtr == this.root {
+	nodePtr := this.nodes[node]
+	parentPtr := this.nodes[newParent]
+	if nodePtr == nil {
+		return errors.New("Node does not exist")
+	} else if parentPtr == nil {
+		return errors.New("Parent does not exist")
+	} else if nodePtr == this.root {
 		return errors.New("Cannot move root")
-	}
-	
-	if this.isDescendant(parentPtr, nodePtr) {
-		return errors.New("Cannot move node to its decendants")
+	} else if this.isDescendant(parentPtr, nodePtr) {
+		return errors.New("Cannot move node to one of its decendants")
 	}
 
 	op := Move{
-		ReplicaID: this.clock.ID,
-		Timestamp: this.clock.Now(),
+		ReplicaID: this.id,
+		Timestamp: this.time,
 		NewParent: parentPtr.id,
-		NewName:   newName,
 		Node:      nodePtr.id,
+		Time:      time.Now(),
 	}
-	this.Apply(op)
-	for i := range this.replicas {
-		this.replicas[i].Send(op)
-	}
-
+	this.apply(op, true)
 	return nil
 }
 
-func (this *Tree) Remove(node []string) error {
-	nodePtr := this.getNode(node)
+func (this *Tree) Remove(node string) error {
+	this.Lock()
+	defer this.Unlock()
+
+	nodePtr := this.nodes[node]
 	if nodePtr == nil {
-		return errors.New("Path does not exist")
-	}
-	
-	if nodePtr == this.root {
+		return errors.New("Node does not exist")
+	} else if nodePtr == this.root {
 		return errors.New("Cannot remove root")
 	}
 
 	op := Move{
-		ReplicaID: this.clock.ID,
-		Timestamp: this.clock.Now(),
+		ReplicaID: this.id,
+		Timestamp: this.time,
 		NewParent: this.trash.id,
-		NewName:   nodePtr.name,
 		Node:      nodePtr.id,
+		Time:      time.Now(),
 	}
-	this.Apply(op)
-	for i := range this.replicas {
-		this.replicas[i].Send(op)
-	}
-
-	return nil
-}
-
-// cambiar current_node a la path si existe
-// cd ./../asd
-func (this *Tree) ChangeDir(path []string) error {
-	node := this.getNode(path);
-	if node == nil {
-		return errors.New("Path does not exist")
-	}
-	
-	this.current = node
+	this.apply(op, true)
 	return nil
 }
 
 // imprimir arbol como "cmd tree"
 func (this *Tree) Print() {
-	this.RLock()
-	defer this.RUnlock()
-	
-	printNode(this.root, 0)
+	this.Lock()
+	defer this.Unlock()
+
+	fmt.Println(rootID)
+	printNode(this.root, "")
 }
 
-func printNode(node *treeNode, level int) {
-	for i := 0; i < level-1; i += 1 {
-		fmt.Print("|  ")
-	}
-	
-	if level > 0 {
-		fmt.Print("|--")
-	}
-	
-	fmt.Println(node.name)
-	for _, child := range node.children {
-		printNode(child, level + 1)
+func printNode(node *treeNode, prefix string) {
+	sort.Slice(node.children, func(i, j int) bool {
+		return node.children[i].id < node.children[j].id
+	})
+
+	for index, child := range node.children {
+		if index == len(node.children)-1 {
+			fmt.Println(prefix+"└──", child.id)
+			printNode(child, prefix+"    ")
+		} else {
+			fmt.Println(prefix+"├──", child.id)
+			printNode(child, prefix+"│   ")
+		}
 	}
 }
-
 
 func (this *Tree) Disconnect() {
 	for i := range this.replicas {
-		this.replicas[i].connected = false
+		this.replicas[i].Disconnect()
 	}
 }
 
 func (this *Tree) Connect() {
 	for i := range this.replicas {
-		this.replicas[i].connected = true
+		this.replicas[i].Connect()
 	}
 }
 
 func (this *Tree) Close() {
-	this.closed = true
 	for i := range this.replicas {
 		this.replicas[i].Close()
 	}

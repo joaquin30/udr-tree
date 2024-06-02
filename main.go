@@ -6,58 +6,37 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strconv"
 	"strings"
 	"udr-tree/crdt"
 )
 
-func isValidName(name string) bool {
-	for _, char := range name {
-		if char == '/' {
-			return false
-		}
-	}
-	
-	return true
-}
-
-func isValidPath(path string) bool {
-	names := strings.Split(path, "/")
-	for i, name := range names {
-		if (i > 0 && i < len(names)-1 && len(name) == 0) || !isValidName(name) {
-			return false
-		}
-	}
-	
-	return true
-}
-
 func main() {
-	helpMessage := `<name>: string sin "/" ni espacios
-<path>: ./../<name>/<name> (relativo) o /<name>/<name>/<name> (absoluto)
+	helpMessage := `COMMANDS
+  add [name] [parent]	Add new node [name] to be child of [parent]
+  rm [node]		Remove [node]
+  mv [node] [parent]	Move [node] to be child of [parent]
+  print			Show tree
+  connect		Connect to other replicas
+  disconnect		Disconnect from other replicas
+  quit			Close app
+  help			Show this message`
 
-- cd <path>: moverse a un nodo
-- add <name> <path>: crear un nuevo nodo en el path con ese nombre
-- rm <path>: eliminar nodo
-- mv <path> <path> <name>: mover nodo a ser hijo de otro nodo con un nuevo nombre
-- print: mostrar todo el sistema de archivos como arbol (similar a tree en CMD)
-- connect: conectarse al servidor
-- disconnect: desconectarse del servidor
-- quit: salir de la app
-- help: mostrar este mensaje`
-
-	if len(os.args) < 2 {
-		log.Fatal(errors.New("Use: ./udr-tree [port] [ip1] [ip2] ..."))
+	if len(os.Args) < 3 {
+		log.Fatal(errors.New("USE: ./udr-tree [id] [port] [ip1] [ip2] ..."))
 	}
-	
-	// os.argv[1]: puerto propio
-	// os.argv[2:]: array de "ip:port" de las replicas
-	tree := crdt.NewTree(os.args[1], os.args[2:])
+
+	id, err := strconv.Atoi(os.Args[1])
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	tree := crdt.NewTree(uint64(id), os.Args[2], os.Args[3:])
 
 	// para leer linea por linea
-	// aca validar entrada del usuario y ejecutar operaciones
-	// separar paths por "/"
-	scanner := bufio.NewScanner(os.Stdin)
+	// validar entrada del usuario y ejecutar operaciones
 	fmt.Print("> ")
+	scanner := bufio.NewScanner(os.Stdin)
 	for scanner.Scan() {
 		// cmd es un array de strings separados por espacios
 		cmd := strings.Fields(scanner.Text())
@@ -69,29 +48,23 @@ func main() {
 		// manejar los comandos, imprimir errores
 		var err error
 		switch cmd[0] {
-		case "cd":
-			if len(cmd) > 1 && isValidPath(cmd[1]) {
-				err = tree.ChangeDir(strings.Split(cmd[1], "/"))
-			} else {
-				err = errors.New("Invalid path")
-			}
 		case "add":
-			if len(cmd) > 2 && isValidName(cmd[1]) && isValidPath(cmd[2]) {
-				err = tree.Add(cmd[1], strings.Split(cmd[2], "/"))
+			if len(cmd) >= 3 {
+				err = tree.Add(cmd[1], cmd[2])
 			} else {
-				err = errors.New("Invalid name or path")
+				err = errors.New("Invalid command")
 			}
 		case "rm":
-			if len(cmd) > 1 && isValidPath(cmd[1]) {
-				err = tree.Remove(strings.Split(cmd[1], "/"))
+			if len(cmd) >= 2 {
+				err = tree.Remove(cmd[1])
 			} else {
-				err = errors.New("Invalid path")
+				err = errors.New("Invalid command")
 			}
 		case "mv":
-			if len(cmd) > 3 && isValidPath(cmd[1]) && isValidPath(cmd[2]) && isValidName(cmd[3]) {
-				err = tree.Move(strings.Split(cmd[1], "/"), strings.Split(cmd[2], "/"), cmd[3])
+			if len(cmd) >= 3 {
+				err = tree.Move(cmd[1], cmd[2])
 			} else {
-				err = errors.New("Invalid path or name")
+				err = errors.New("Invalid command")
 			}
 		case "print":
 			tree.Print()
@@ -101,7 +74,7 @@ func main() {
 			tree.Disconnect()
 		case "quit":
 			tree.Close()
-			os.Exit(0)
+			return
 		case "help":
 			fmt.Println(helpMessage)
 		default:
@@ -111,7 +84,7 @@ func main() {
 		if err != nil {
 			log.Println(err)
 		}
-		
+
 		fmt.Print("> ")
 	}
 }
