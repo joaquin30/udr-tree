@@ -25,14 +25,12 @@ type treeNode struct {
 
 type Tree struct {
 	sync.Mutex
-	id, time    uint64
+	id, time    uint64 // Lamport clock
 	Counter     uint64
-	server      uint64
 	replicas    []*Replica
 	nodes       map[string]*treeNode
 	history     []LogMove
 	root, trash *treeNode
-	current     *treeNode
 }
 
 func NewTree(id uint64, port string, replicaIPs []string) *Tree {
@@ -55,10 +53,9 @@ func NewTree(id uint64, port string, replicaIPs []string) *Tree {
 		children: make([]*treeNode, 0),
 	}
 	tree.trash = tree.nodes[trashID]
-	tree.current = tree.root
 
 	go tree.listen(port)
-	time.Sleep(5 * time.Second) // para que las demas replicas inicien
+	time.Sleep(5*time.Second) // para que las demas replicas inicien
 
 	tree.replicas = make([]*Replica, len(replicaIPs))
 	for i := range tree.replicas {
@@ -88,11 +85,10 @@ func (this *Tree) handleConnection(conn net.Conn) {
 	defer conn.Close()
 	// esta cosa es magica, TCP y bufio mi dios
 	reader := bufio.NewReader(conn)
-	
 	for {
 		msg, err := reader.ReadBytes('}')
 		if err != nil {
-			break
+			return
 		}
 
 		// log.Println("RECV:", string(msg))
@@ -105,7 +101,7 @@ func (this *Tree) applyRecvMove(op Move) {
 	defer this.Unlock()
 
 	if this.time < op.Timestamp+1 {
-		this.time = op.Timestamp + 1
+		this.time = op.Timestamp+1
 	}
 
 	this.apply(op)
@@ -181,8 +177,9 @@ func (this *Tree) apply(move Move) {
 
 	// Transmision de actualizacion a otras replicas
 	if move.ReplicaID == this.id {
+		msg := MoveToBytes(move)
 		for i := range this.replicas {
-			this.replicas[i].Send(move)
+			this.replicas[i].Send(msg)
 		}
 	}
 	

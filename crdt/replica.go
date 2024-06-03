@@ -24,7 +24,7 @@ func NewReplica(serverIP string) *Replica {
 	replica := Replica{
 		// se necesita mucho espacio en queue para evitar locks
 		// ya que si se queda sin espacio bloquea hasta tenerlo
-		queue:     make(chan []byte, 1000000),
+		queue:     make(chan []byte, 10000000),
 		exit:      make(chan bool),
 		connected: true,
 		conn:      conn,
@@ -34,8 +34,8 @@ func NewReplica(serverIP string) *Replica {
 	return &replica
 }
 
-func (this *Replica) Send(move Move) {
-	this.queue <- MoveToBytes(move)
+func (this *Replica) Send(msg []byte) {
+	this.queue <- msg
 }
 
 func (this *Replica) Disconnect() {
