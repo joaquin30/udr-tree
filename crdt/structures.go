@@ -20,6 +20,8 @@ func MoveFromBytes(data []byte) Move {
 	var move Move
 	err := json.Unmarshal(data, &move)
 	if err != nil {
+		log.Println("Error parsing JSON")
+		log.Println(string(data))
 		log.Fatal(err)
 	}
 	

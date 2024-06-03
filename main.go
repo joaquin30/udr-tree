@@ -33,9 +33,9 @@ func main() {
 
 	tree := crdt.NewTree(uint64(id), os.Args[2], os.Args[3:])
 
-	// para leer linea por linea
-	// validar entrada del usuario y ejecutar operaciones
+	
 	fmt.Print("> ")
+	// para leer linea por linea
 	scanner := bufio.NewScanner(os.Stdin)
 	for scanner.Scan() {
 		// cmd es un array de strings separados por espacios

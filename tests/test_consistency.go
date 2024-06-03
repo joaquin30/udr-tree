@@ -12,12 +12,12 @@ import (
 )
 
 const (
-	MaxN = 1000
+	MaxN = 10000
 )
 
 func main() {
 	if len(os.Args) < 3 {
-		log.Fatal(errors.New("USE: ./udr-tree [id] [port] [ip1] [ip2] ..."))
+		log.Fatal(errors.New("USE: ./test [id] [port] [ip1] [ip2] ..."))
 	}
 
 	id, err := strconv.Atoi(os.Args[1])
@@ -32,9 +32,9 @@ func main() {
 }
 
 /*
-0: add 20 %
-1: remove 20 %
-2: move 50 %
+0: add 20%
+1: remove 20%
+2: move 50%
 3: disconnect 10%
 */
 

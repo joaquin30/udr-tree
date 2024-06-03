@@ -8,8 +8,7 @@ import (
 	"sort"
 	"sync"
 	"time"
-	"os"
-	"strconv"
+	"bufio"
 )
 
 const (
@@ -34,7 +33,6 @@ type Tree struct {
 	history     []LogMove
 	root, trash *treeNode
 	current     *treeNode
-	file        *os.File
 }
 
 func NewTree(id uint64, port string, replicaIPs []string) *Tree {
@@ -58,11 +56,6 @@ func NewTree(id uint64, port string, replicaIPs []string) *Tree {
 	}
 	tree.trash = tree.nodes[trashID]
 	tree.current = tree.root
-	f, err := os.Create("time"+strconv.Itoa(int(id))+".txt")
-	if err != nil {
-		log.Fatal(err)
-	}
-	tree.file = f
 
 	go tree.listen(port)
 	time.Sleep(5 * time.Second) // para que las demas replicas inicien
@@ -93,16 +86,17 @@ func (this *Tree) listen(port string) {
 
 func (this *Tree) handleConnection(conn net.Conn) {
 	defer conn.Close()
-
-	var buffer [2048]byte
+	// esta cosa es magica, TCP y bufio mi dios
+	reader := bufio.NewReader(conn)
+	
 	for {
-		sz, err := conn.Read(buffer[:])
-		if err != nil || sz == 0 {
+		msg, err := reader.ReadBytes('}')
+		if err != nil {
 			break
 		}
 
-		// log.Println("RECV:", string(buffer[:sz]))
-		go this.applyRecvMove(MoveFromBytes(buffer[:sz]))
+		// log.Println("RECV:", string(msg))
+		go this.applyRecvMove(MoveFromBytes(msg))
 	}
 }
 
@@ -114,7 +108,7 @@ func (this *Tree) applyRecvMove(op Move) {
 		this.time = op.Timestamp + 1
 	}
 
-	this.apply(op, false)
+	this.apply(op)
 }
 
 // checkear si node1 es descendiente de node2
@@ -152,22 +146,24 @@ func (this *Tree) movePtr(node, newParent *treeNode) {
 // aca esta la magia, debe revertir ops del historial, aplicar la nueva op
 // guardar la nueva op en el historial y reaplicar las ops del historial
 // ignorando las ops invalidas
-func (this *Tree) apply(move Move, send bool) {
-	//~ fmt.Println(1)
+func (this *Tree) apply(move Move) {
+	// Creando registro en el historial
 	this.history = append(this.history, LogMove{
 		ReplicaID: move.ReplicaID,
 		Timestamp: move.Timestamp,
 		NewParent: move.NewParent,
 		Node:      move.Node,
 	})
+	
+	// Revirtiendo registros con un timestamp mayor
 	i := len(this.history) - 1
 	for i > 0 && LogMoveBefore(this.history[i], this.history[i-1]) {
 		this.history[i], this.history[i-1] = this.history[i-1], this.history[i]
 		this.revert(i)
-		i -= 1
+		i--
 	}
 
-	//~ fmt.Println(2)
+	// Creando un nodo implícito
 	_, ok := this.nodes[move.Node]
 	if !ok {
 		this.nodes[move.Node] = &treeNode{
@@ -177,23 +173,21 @@ func (this *Tree) apply(move Move, send bool) {
 		}
 	}
 
-	//~ fmt.Println(3)
+	// Aplicando la operacion y reaplicando operaciones revertidas
 	for i < len(this.history) {
 		this.reapply(i)
-		i += 1
+		i++
 	}
 
-	//~ fmt.Println(4)
-	if send {
+	// Transmision de actualizacion a otras replicas
+	if move.ReplicaID == this.id {
 		for i := range this.replicas {
 			this.replicas[i].Send(move)
 		}
 	}
-
-	//~ fmt.Println(5)
-	this.time += 1
-	this.Counter += 1
-	this.file.WriteString(string(time.Now().Sub(move.Time).String())+"\n")
+	
+	this.time++
+	this.Counter++
 }
 
 // revierte un logmove si no ha sido ignorado
@@ -249,7 +243,7 @@ func (this *Tree) Add(name, parent string) error {
 		Node:      name,
 		Time:      time.Now(),
 	}
-	this.apply(op, true)
+	this.apply(op)
 	return nil
 }
 
@@ -276,7 +270,7 @@ func (this *Tree) Move(node, newParent string) error {
 		Node:      nodePtr.id,
 		Time:      time.Now(),
 	}
-	this.apply(op, true)
+	this.apply(op)
 	return nil
 }
 
@@ -298,7 +292,7 @@ func (this *Tree) Remove(node string) error {
 		Node:      nodePtr.id,
 		Time:      time.Now(),
 	}
-	this.apply(op, true)
+	this.apply(op)
 	return nil
 }
 

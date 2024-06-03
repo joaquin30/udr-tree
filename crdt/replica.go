@@ -3,8 +3,8 @@ package crdt
 import (
 	"log"
 	"net"
-	"time"
 	"sync"
+	// "time"
 )
 
 type Replica struct {
@@ -22,7 +22,9 @@ func NewReplica(serverIP string) *Replica {
 	}
 
 	replica := Replica{
-		queue:     make(chan []byte, 4096),
+		// se necesita mucho espacio en queue para evitar locks
+		// ya que si se queda sin espacio bloquea hasta tenerlo
+		queue:     make(chan []byte, 1000000),
 		exit:      make(chan bool),
 		connected: true,
 		conn:      conn,
@@ -39,7 +41,7 @@ func (this *Replica) Send(move Move) {
 func (this *Replica) Disconnect() {
 	if this.connected {
 		this.connected = false
-		this.exit <- false
+		this.exit <- true
 	}
 }
 
@@ -68,14 +70,18 @@ func (this *Replica) update() {
 			}
 			
 			// log.Println("SEND:", string(msg))
-			_, err := this.conn.Write(msg)
-			if err != nil {
+			sz, err := this.conn.Write(msg)
+			if err != nil || sz != len(msg) {
 				this.wg.Done()
 				return
 			}
 			
-			// para evitar errores con tcp
-			time.Sleep(10*time.Millisecond)
+			// Sin usar bufio en tree.go se necesita esta linea
+			// Ya que los mensajes TCP pueden juntarse, ya que estan basado en streams
+			// Pero esa linea hace que el programa sea 40 veces mas lento !!!!!
+			
+			// TCP framing
+			// time.Sleep(10*time.Millisecond)
 
 		case <-this.exit:
 			return
