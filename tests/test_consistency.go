@@ -2,33 +2,35 @@ package main
 
 import (
 	"os"
-	"strconv"
 	"udr-tree/crdt"
 	"log"
 	"time"
 	"math/rand"
 	"errors"
+	"strconv"
 	"github.com/google/uuid"
 )
 
 const (
-	MaxN = 10000
+	MaxN = 100
 )
 
 func main() {
-	if len(os.Args) < 3 {
-		log.Fatal(errors.New("USE: ./test [id] [port] [ip1] [ip2] ..."))
+	if len(os.Args) != 3 {
+		log.Fatal(errors.New("USE: ./udr-tree [id] [server_ip]"))
 	}
-
+	
 	id, err := strconv.Atoi(os.Args[1])
 	if err != nil {
-		log.Fatal(err)
+		panic(err)
 	}
-
-	tree := crdt.NewTree(uint64(id), os.Args[2], os.Args[3:])
-	GenerateLoad(tree, id)
+	
+	log.SetPrefix("CRDT "+os.Args[1]+" ")
+	tree := crdt.NewTree(id, os.Args[2])
+	time.Sleep(5*time.Second)
+	GenerateLoad(tree)
 	tree.Print()
-	log.Println("CRDT", id, "finalized.")
+	log.Println("CRDT finalized.")
 }
 
 /*
@@ -38,8 +40,9 @@ func main() {
 3: disconnect 10%
 */
 
-func GenerateLoad(tree *crdt.Tree, id int) {
+func GenerateLoad(tree *crdt.Tree) {
 	start := time.Now()
+	log.Println("Start")
 	nodes := []string{"root"}
 	for t := 0; t < MaxN; t++ {
 		i := rand.Intn(len(nodes))
@@ -67,18 +70,23 @@ func GenerateLoad(tree *crdt.Tree, id int) {
 			tree.Move(nodes[i], nodes[j])
 		} else {
 			if connected {
-				connected = false
+				// log.Println("Disconnected")
 				tree.Disconnect()
 			} else {
-				connected = true
+				// log.Println("Connected")
 				tree.Connect()
 			}
+			
+			connected = !connected
 		}
 	}
 	
-	tree.Connect()
+	if !connected {
+		// log.Println("Connected")
+		tree.Connect()
+	}
+	
 	tree.Close()
-	log.Println("Time CRDT", id, time.Now().Sub(start))
-	time.Sleep(10*time.Second)
-	log.Println("Operations CRDT", id, tree.Counter)
+	log.Println("Duration:", time.Now().Sub(start))
+	time.Sleep(60*time.Second)
 }

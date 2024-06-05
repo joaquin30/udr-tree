@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"strconv"
 	"strings"
+	"strconv"
 	"udr-tree/crdt"
 )
 
@@ -22,18 +22,17 @@ func main() {
   quit			Close app
   help			Show this message`
 
-	if len(os.Args) < 3 {
-		log.Fatal(errors.New("USE: ./udr-tree [id] [port] [ip1] [ip2] ..."))
+	if len(os.Args) != 3 {
+		log.Fatal(errors.New("USE: ./udr-tree [id] [server_ip]"))
 	}
-
+	
 	id, err := strconv.Atoi(os.Args[1])
 	if err != nil {
-		log.Fatal(err)
+		panic(err)
 	}
-
-	tree := crdt.NewTree(uint64(id), os.Args[2], os.Args[3:])
-
 	
+	tree := crdt.NewTree(id, os.Args[2])
+	time.Sleep(5*time.Second)
 	fmt.Print("> ")
 	// para leer linea por linea
 	scanner := bufio.NewScanner(os.Stdin)

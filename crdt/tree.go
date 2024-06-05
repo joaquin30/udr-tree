@@ -3,12 +3,9 @@ package crdt
 import (
 	"errors"
 	"fmt"
-	"log"
-	"net"
 	"sort"
 	"sync"
 	"time"
-	"bufio"
 )
 
 const (
@@ -25,17 +22,22 @@ type treeNode struct {
 
 type Tree struct {
 	sync.Mutex
-	id, time    uint64 // Lamport clock
-	Counter     uint64
-	replicas    []*Replica
-	nodes       map[string]*treeNode
-	history     []LogMove
-	root, trash *treeNode
+	id, time  uint64 // Lamport clock
+	nodes     map[string]*treeNode
+	history   []LogMove
+	root      *treeNode
+	trash     *treeNode
+	conn      *ReplicaConn
+	// ops    []Move
+	LocalSum  time.Duration
+	LocalCnt  uint64
+	RemoteSum time.Duration
+	RemoteCnt uint64
 }
 
-func NewTree(id uint64, port string, replicaIPs []string) *Tree {
+func NewTree(id int, serverIP string) *Tree {
 	tree := Tree{}
-	tree.id = id
+	tree.id = uint64(id)
 	tree.time = 0
 	tree.nodes = make(map[string]*treeNode)
 	tree.history = make([]LogMove, 0)
@@ -43,68 +45,30 @@ func NewTree(id uint64, port string, replicaIPs []string) *Tree {
 	tree.nodes[rootID] = &treeNode{
 		id:       rootID,
 		parent:   nil,
-		children: make([]*treeNode, 0),
+		children: []*treeNode{},
 	}
 	tree.root = tree.nodes[rootID]
 
 	tree.nodes[trashID] = &treeNode{
 		id:       trashID,
 		parent:   nil,
-		children: make([]*treeNode, 0),
+		children: []*treeNode{},
 	}
 	tree.trash = tree.nodes[trashID]
-
-	go tree.listen(port)
-	time.Sleep(5*time.Second) // para que las demas replicas inicien
-
-	tree.replicas = make([]*Replica, len(replicaIPs))
-	for i := range tree.replicas {
-		tree.replicas[i] = NewReplica(replicaIPs[i])
-	}
-
+	
+	tree.conn = NewReplicaConn(&tree, serverIP)
 	return &tree
 }
 
-func (this *Tree) listen(port string) {
-	ln, err := net.Listen("tcp", ":"+port)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	for {
-		conn, err := ln.Accept()
-		if err != nil {
-			return
-		}
-
-		go this.handleConnection(conn)
-	}
-}
-
-func (this *Tree) handleConnection(conn net.Conn) {
-	defer conn.Close()
-	// esta cosa es magica, TCP y bufio mi dios
-	reader := bufio.NewReader(conn)
-	for {
-		msg, err := reader.ReadBytes('}')
-		if err != nil {
-			return
-		}
-
-		// log.Println("RECV:", string(msg))
-		go this.applyRecvMove(MoveFromBytes(msg))
-	}
-}
-
-func (this *Tree) applyRecvMove(op Move) {
+func (this *Tree) applyRecvMove(move Move) {
 	this.Lock()
 	defer this.Unlock()
-
-	if this.time < op.Timestamp+1 {
-		this.time = op.Timestamp+1
+	
+	if this.time < move.Timestamp+1 {
+		this.time = move.Timestamp+1
 	}
-
-	this.apply(op)
+	
+	this.apply(move)
 }
 
 // checkear si node1 es descendiente de node2
@@ -143,6 +107,8 @@ func (this *Tree) movePtr(node, newParent *treeNode) {
 // guardar la nueva op en el historial y reaplicar las ops del historial
 // ignorando las ops invalidas
 func (this *Tree) apply(move Move) {
+	// this.ops = append(this.ops, move)
+	
 	// Creando registro en el historial
 	this.history = append(this.history, LogMove{
 		ReplicaID: move.ReplicaID,
@@ -177,14 +143,15 @@ func (this *Tree) apply(move Move) {
 
 	// Transmision de actualizacion a otras replicas
 	if move.ReplicaID == this.id {
-		msg := MoveToBytes(move)
-		for i := range this.replicas {
-			this.replicas[i].Send(msg)
-		}
+		this.LocalCnt++
+		this.LocalSum += time.Now().Sub(move.Time)
+		this.conn.Send(move)
+	} else {
+		this.RemoteCnt++
+		this.RemoteSum += time.Now().Sub(move.Time)
 	}
 	
 	this.time++
-	this.Counter++
 }
 
 // revierte un logmove si no ha sido ignorado
@@ -298,6 +265,18 @@ func (this *Tree) Print() {
 	this.Lock()
 	defer this.Unlock()
 
+	/* sort.Slice(this.ops, func(i, j int) bool {
+		if this.ops[i].Timestamp == this.ops[j].Timestamp {
+			return this.ops[i].ReplicaID < this.ops[j].ReplicaID
+		}
+		
+		return this.ops[i].Timestamp < this.ops[j].Timestamp
+	})
+	
+	for _, v := range this.ops {
+		fmt.Println(v)
+	}*/
+
 	fmt.Println(rootID)
 	printNode(this.root, "")
 }
@@ -319,19 +298,13 @@ func printNode(node *treeNode, prefix string) {
 }
 
 func (this *Tree) Disconnect() {
-	for i := range this.replicas {
-		this.replicas[i].Disconnect()
-	}
+	this.conn.Disconnect()
 }
 
 func (this *Tree) Connect() {
-	for i := range this.replicas {
-		this.replicas[i].Connect()
-	}
+	this.conn.Connect()
 }
 
 func (this *Tree) Close() {
-	for i := range this.replicas {
-		this.replicas[i].Close()
-	}
+	this.conn.Close()
 }

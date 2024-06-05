@@ -6,12 +6,16 @@ import (
 	"encoding/json"
 )
 
+type ReplicaId struct {
+	Id uint64
+}
+
 type Move struct {
 	ReplicaID uint64
 	Timestamp uint64
 	NewParent string
 	Node      string
-	Time 	  time.Time
+	Time      time.Time
 }
 
 // definir estructura de los bytes

@@ -4,7 +4,6 @@ import (
 	"os"
 	"strconv"
 	"udr-tree/crdt"
-	"fmt"
 	"log"
 	"time"
 	"math/rand"
@@ -13,27 +12,34 @@ import (
 )
 
 func main() {
-	if len(os.Args) < 4 {
-		log.Fatal(errors.New("USE: ./test [ops] [id] [port] [ip1] [ip2] ..."))
+	if len(os.Args) != 4 {
+		log.Fatal(errors.New("USE: ./test [id] [server_ip] [ops]"))
 	}
 
-	ops, err := strconv.Atoi(os.Args[1])
+	id, err := strconv.Atoi(os.Args[1])
 	if err != nil {
-		log.Fatal(err)
+		panic(err)
 	}
 	
-	id, err := strconv.Atoi(os.Args[2])
-	if err != nil {
-		log.Fatal(err)
-	}
 
-	tree := crdt.NewTree(uint64(id), os.Args[3], os.Args[4:])
+	ops, err := strconv.Atoi(os.Args[3])
+	if err != nil {
+		panic(err)
+	}
+	
+
+	log.SetPrefix("CRDT "+os.Args[1]+" ")
+	tree := crdt.NewTree(id, os.Args[2])
+	time.Sleep(5*time.Second)
 	go func() {
 		time.Sleep(time.Minute)
-		os.Exit(0);
+		log.Println("Operations per second:", (tree.LocalCnt + tree.RemoteCnt) / 60)
+		log.Println("Avg delay for local operation:", tree.LocalSum / time.Duration(tree.LocalCnt))
+		log.Println("Avg delay for remote operation:", tree.RemoteSum / time.Duration(tree.RemoteCnt))
+		os.Exit(0)
 	}()
 	
-	GenerateLoad(tree, ops, id)
+	GenerateLoad(tree, ops)
 }
 
 /*
@@ -42,23 +48,22 @@ func main() {
 2: move 60%
 */
 
-func GenerateLoad(tree *crdt.Tree, ops, id int) {
+func GenerateLoad(tree *crdt.Tree, ops int) {
 	nodes := []string{"root"}
 	
-	for t := 0; t < 1000; t++ {
+	for t := 0; t < 100; t++ {
 		i := rand.Intn(len(nodes))
 		name := uuid.New().String()
 		nodes = append(nodes, name)
 		tree.Add(name, nodes[i])
 	}
 	
-	log.Println("Finished creating tree", id)
-	time.Sleep(5*time.Second)
+	log.Println("Finished creating tree")
+	time.Sleep(10*time.Second)
 	cnt := 0
 	
 	go func() {
 		for range time.Tick(time.Second) {
-			fmt.Println(cnt)
 			cnt = 0
 		}
 	}()
@@ -71,10 +76,29 @@ func GenerateLoad(tree *crdt.Tree, ops, id int) {
 			continue
 		}
 		
-		i := rand.Intn(len(nodes))
-		j := rand.Intn(len(nodes))
-		tree.Move(nodes[i], nodes[j])
-		cnt++
+		x := rand.Intn(10)
+		if x < 2 {
+			i := rand.Intn(len(nodes))
+			name := uuid.New().String()
+			nodes = append(nodes, name)
+			if tree.Add(name, nodes[i]) == nil {
+				cnt++
+			}
+		} else if x < 4 {
+			i := rand.Intn(len(nodes))
+			if tree.Remove(nodes[i]) == nil {
+				cnt++
+			}
+			
+			nodes[i], nodes[len(nodes)-1] = nodes[len(nodes)-1], nodes[i]
+			nodes = nodes[:len(nodes)-1]
+		} else {
+			i := rand.Intn(len(nodes))
+			j := rand.Intn(len(nodes))
+			if tree.Move(nodes[i], nodes[j]) == nil {
+				cnt++
+			}
+		}
 	}
 }
 

@@ -4,13 +4,15 @@ echo "Compiling test..."
 go build ./test_consistency.go
 
 rm -f log0.txt log1.txt log2.txt
+# MQTT=mqtt://140.238.237.68:1883
+MQTT=mqtt://broker.hivemq.com:1883
 
 echo "Run Replica 0"
-./test_consistency.exe 0 5000 'localhost:5001' 'localhost:5002' > log0.txt &
+./test_consistency.exe 0 "$MQTT" > log0.txt &
 echo "Run Replica 1"
-./test_consistency.exe 1 5001 'localhost:5000' 'localhost:5002' > log1.txt &
+./test_consistency.exe 1 "$MQTT" > log1.txt &
 echo "Run Replica 2"
-./test_consistency.exe 2 5002 'localhost:5000' 'localhost:5001' > log2.txt &
+./test_consistency.exe 2 "$MQTT" > log2.txt &
 
 echo "Waiting for CRDTs eventual consistency..."
 wait $(jobs -p)
