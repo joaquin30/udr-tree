@@ -3,57 +3,91 @@ package crdt
 import (
 	"log"
 	"time"
-	"encoding/json"
+	"github.com/google/uuid"
+	"github.com/vmihailenco/msgpack/v5"
 )
 
-type ReplicaId struct {
-	Id uint64
-}
+type Operation struct {
+	// Para omitir campos en blanco
+	_msgpack struct{} `msgpack:",omitempty"`
 
-type Move struct {
 	ReplicaID uint64
 	Timestamp uint64
-	NewParent string
-	Node      string
+	NewParent uuid.UUID
+	Node      uuid.UUID
+	Name      string
 	Time      time.Time
 }
 
-// definir estructura de los bytes
-
-func MoveFromBytes(data []byte) Move {
-	var move Move
-	err := json.Unmarshal(data, &move)
+// Se usa MessagePack para serializar las operaciones
+func OperationFromBytes(data []byte) Operation {
+	var op Operation
+	err := msgpack.Unmarshal(data, &op)
 	if err != nil {
-		log.Println("Error parsing JSON")
+		log.Println("Error decoding MessagePack")
 		log.Println(string(data))
 		log.Fatal(err)
 	}
 	
-	return move
+	return op
 }
 
-func MoveToBytes(move Move) []byte {
-	bin, err := json.Marshal(move)
+func OperationToBytes(op Operation) []byte {
+	data, err := msgpack.Marshal(op)
 	if err != nil {
 		log.Fatal(err)
 	}
 	
-	return bin
+	return data
 }
 
-type LogMove struct {
+type LogOperation struct {
 	ReplicaID uint64
 	Timestamp uint64
-	OldParent string
-	NewParent string
-	Node      string
+	OldParent uuid.UUID
+	NewParent uuid.UUID
+	Node      uuid.UUID
 	ignored   bool
 }
 
-func LogMoveBefore(log1, log2 LogMove) bool {
+func LogOperationBefore(log1, log2 LogOperation) bool {
 	if log1.Timestamp == log2.Timestamp {
 		return log1.ReplicaID < log2.ReplicaID
 	}
 
 	return log1.Timestamp < log2.Timestamp
+}
+
+// https://cplusplus.com/reference/algorithm/upper_bound/
+func HistoryUpperBound(history []LogOperation, time uint64) int {
+	start := 0
+	cnt := len(history)
+	for cnt > 0 {
+		step := cnt / 2
+		i := start + step
+		if history[i].Timestamp <= time {
+			start = i + 1
+			cnt -= step + 1
+		} else {
+			cnt = step
+		}
+	}
+	
+	return start
+}
+
+func Max(x, y uint64) uint64 {
+	if x >= y {
+		return x
+	}
+	
+	return y
+}
+
+func Min(x, y uint64) uint64 {
+	if x <= y {
+		return x
+	}
+	
+	return y
 }

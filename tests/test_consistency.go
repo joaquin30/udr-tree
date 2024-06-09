@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	MaxN = 100
+	MaxN = 1000
 )
 
 func main() {
@@ -25,12 +25,11 @@ func main() {
 		panic(err)
 	}
 	
-	log.SetPrefix("CRDT "+os.Args[1]+" ")
+	log.SetPrefix("CRDT " + os.Args[1] + " ")
 	tree := crdt.NewTree(id, os.Args[2])
-	time.Sleep(5*time.Second)
 	GenerateLoad(tree)
 	tree.Print()
-	log.Println("CRDT finalized.")
+	log.Println("Finalized")
 }
 
 /*
@@ -44,15 +43,27 @@ func GenerateLoad(tree *crdt.Tree) {
 	start := time.Now()
 	log.Println("Start")
 	nodes := []string{"root"}
-	for t := 0; t < MaxN; t++ {
+	cnt := 0
+	for /* range time.Tick(100 * time.Millisecond) */ {
+		if cnt >= MaxN {
+			break
+		}
+
+		cnt++
 		i := rand.Intn(len(nodes))
 		name := uuid.New().String()
-		nodes = append(nodes, name)
 		tree.Add(name, nodes[i])
+		nodes = append(nodes, name)
 	}
 	
 	connected := true
-	for t := 0; t < MaxN; t++ {
+	cnt = 0
+	for /* range time.Tick(100 * time.Millisecond) */ {
+		if cnt >= MaxN {
+			break
+		}
+
+		cnt++
 		x := rand.Intn(10)
 		if x < 2 {
 			i := rand.Intn(len(nodes))
@@ -70,10 +81,8 @@ func GenerateLoad(tree *crdt.Tree) {
 			tree.Move(nodes[i], nodes[j])
 		} else {
 			if connected {
-				// log.Println("Disconnected")
 				tree.Disconnect()
 			} else {
-				// log.Println("Connected")
 				tree.Connect()
 			}
 			
@@ -81,12 +90,9 @@ func GenerateLoad(tree *crdt.Tree) {
 		}
 	}
 	
-	if !connected {
-		// log.Println("Connected")
-		tree.Connect()
-	}
-	
+	tree.Connect()
 	tree.Close()
 	log.Println("Duration:", time.Now().Sub(start))
-	time.Sleep(60*time.Second)
+	log.Println("Waiting for eventual consistency")
+	time.Sleep(5 * time.Second)
 }

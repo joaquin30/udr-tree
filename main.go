@@ -6,8 +6,9 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"strings"
 	"strconv"
+	"strings"
+	"time"
 	"udr-tree/crdt"
 )
 
@@ -15,7 +16,7 @@ func main() {
 	helpMessage := `COMMANDS
   add [name] [parent]	Add new node [name] to be child of [parent]
   rm [node]		Remove [node]
-  mv [node] [parent]	Move [node] to be child of [parent]
+  mv [node] [parent]	Operation [node] to be child of [parent]
   print			Show tree
   connect		Connect to other replicas
   disconnect		Disconnect from other replicas
@@ -25,14 +26,14 @@ func main() {
 	if len(os.Args) != 3 {
 		log.Fatal(errors.New("USE: ./udr-tree [id] [server_ip]"))
 	}
-	
+
 	id, err := strconv.Atoi(os.Args[1])
 	if err != nil {
 		panic(err)
 	}
-	
+
 	tree := crdt.NewTree(id, os.Args[2])
-	time.Sleep(5*time.Second)
+	time.Sleep(5 * time.Second)
 	fmt.Print("> ")
 	// para leer linea por linea
 	scanner := bufio.NewScanner(os.Stdin)
