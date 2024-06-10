@@ -1,10 +1,16 @@
+/*
+ * This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/.
+ */
+
 package crdt
 
 import (
-	"log"
-	"time"
 	"github.com/google/uuid"
 	"github.com/vmihailenco/msgpack/v5"
+	"log"
+	"time"
 )
 
 type Operation struct {
@@ -28,7 +34,7 @@ func OperationFromBytes(data []byte) Operation {
 		log.Println(string(data))
 		log.Fatal(err)
 	}
-	
+
 	return op
 }
 
@@ -37,7 +43,7 @@ func OperationToBytes(op Operation) []byte {
 	if err != nil {
 		log.Fatal(err)
 	}
-	
+
 	return data
 }
 
@@ -72,7 +78,7 @@ func HistoryUpperBound(history []LogOperation, time uint64) int {
 			cnt = step
 		}
 	}
-	
+
 	return start
 }
 
@@ -80,7 +86,7 @@ func Max(x, y uint64) uint64 {
 	if x >= y {
 		return x
 	}
-	
+
 	return y
 }
 
@@ -88,6 +94,6 @@ func Min(x, y uint64) uint64 {
 	if x <= y {
 		return x
 	}
-	
+
 	return y
 }

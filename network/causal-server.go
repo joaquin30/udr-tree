@@ -1,8 +1,15 @@
+/*
+ * This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/.
+ */
+
 package network
 
 import (
-	"net"
+	"os"
 	"log"
+	"net"
 	"github.com/vmihailenco/msgpack/v5"
 )
 
@@ -13,16 +20,20 @@ type message struct {
 
 var (
 	connected [10]bool
-    conn      [10]net.Conn
-    queue     chan message
+	conn      [10]net.Conn
+	queue     chan message
 )
 
 func main() {
-	ln, err := net.Listen("tcp", ":5000")
+	if len(os.Args) != 2 {
+		log.Fatal("USE: ./causal-server [PORT]")
+	}
+	
+	ln, err := net.Listen("tcp", ":"+os.Args[1])
 	if err != nil {
 		panic(err)
 	}
-	
+
 	queue = make(chan message, 100000)
 	go processQueue()
 
@@ -31,7 +42,7 @@ func main() {
 		if err != nil {
 			panic(err)
 		}
-		
+
 		for id, v := range connected {
 			if !v {
 				connected[id] = true
@@ -51,10 +62,10 @@ func handleConnection(id int) {
 		if err != nil {
 			break
 		}
-		
+
 		queue <- message{id, data}
 	}
-	
+
 	connected[id] = false
 	conn[id].Close()
 	log.Println("Disconnected replica", id)

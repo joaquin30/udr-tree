@@ -1,3 +1,9 @@
+/*
+ * This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/.
+ */
+
 package network
 
 import (
@@ -23,12 +29,12 @@ func NewCausalConn(tree CRDTTree, serverIP string) *CausalConn {
 		exit:      make(chan bool),
 		connected: true,
 	}
-	
+
 	conn, err := net.Dial("tcp", serverIP)
 	if err != nil {
 		panic(err)
 	}
-	
+
 	replica.conn = conn
 	go replica.receiveOperations()
 	go replica.processToSend()
@@ -85,7 +91,7 @@ func (this *CausalConn) receiveOperations() {
 		if err != nil {
 			panic(err)
 		}
-		
+
 		//log.Println("RECV: " + string(data))
 		this.toApply <- data
 	}

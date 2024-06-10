@@ -1,14 +1,20 @@
+/*
+ * This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/.
+ */
+
 package main
 
 import (
-	"os"
-	"strconv"
-	"udr-tree/crdt"
-	"log"
-	"time"
-	"math/rand"
 	"errors"
 	"github.com/google/uuid"
+	"log"
+	"math/rand"
+	"os"
+	"strconv"
+	"time"
+	"udr-tree/crdt"
 )
 
 const (
@@ -35,14 +41,14 @@ func main() {
 	go func() {
 		time.Sleep(total * time.Second)
 		log.Println("\n\tSeconds running:", total,
-			"\n\tOperations per second:", (tree.LocalCnt + tree.RemoteCnt) / total,
-			"\n\tAvg delay for local operation:", tree.LocalSum / time.Duration(tree.LocalCnt),
-			"\n\tAvg delay for remote operation:", tree.RemoteSum / time.Duration(tree.RemoteCnt),
-			"\n\tAvg undo and redos for remote operation:", tree.UndoRedoCnt / tree.RemoteCnt,
-			"\n\tAvg bandwidth consumption:", tree.PacketSzSum / total, "bps")
+			"\n\tOperations per second:", (tree.LocalCnt+tree.RemoteCnt)/total,
+			"\n\tAvg delay for local operation:", tree.LocalSum/time.Duration(tree.LocalCnt),
+			"\n\tAvg delay for remote operation:", tree.RemoteSum/time.Duration(tree.RemoteCnt),
+			"\n\tAvg undo and redos for remote operation:", tree.UndoRedoCnt/tree.RemoteCnt,
+			"\n\tAvg bandwidth consumption:", tree.PacketSzSum/total, "bps")
 		os.Exit(0)
 	}()
-	
+
 	GenerateLoad(tree, ops)
 }
 
@@ -55,7 +61,7 @@ func GenerateLoad(tree *crdt.Tree, ops int) {
 		current := time.Now()
 		delay += current.Sub(previous)
 		previous = current
-		
+
 		for delay >= rate {
 			// Solo se añaden o se mueven nodos con probabilidad 50%
 			// No se eliminan
@@ -71,7 +77,6 @@ func GenerateLoad(tree *crdt.Tree, ops int) {
 				j := rand.Intn(len(nodes))
 				tree.Move(nodes[i], nodes[j])
 			}
-		}		
+		}
 	}
 }
-

@@ -9,7 +9,6 @@ if ! go build ./test_stress.go; then
 fi
 
 SERVER=localhost:5000
-# SERVER=140.238.237.68:1883
 # SERVER=mqtt://test.mosquitto.org:1883
 # SERVER=mqtt://mqtt.eclipseprojects.io:1883
 # SERVER=mqtt://broker.hivemq.com:1883

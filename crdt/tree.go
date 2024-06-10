@@ -1,24 +1,30 @@
+/*
+ * This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/.
+ */
+
 package crdt
 
 import (
 	"errors"
 	"fmt"
+	"github.com/google/uuid"
+	"log"
 	"sort"
 	"sync"
 	"time"
-	"log"
 	"udr-tree/network"
-	"github.com/google/uuid"
 )
 
 const (
-	rootName = "root"
-	trashName = "trash"
+	rootName    = "root"
+	trashName   = "trash"
 	NumReplicas = 3
 )
 
 var (
-	rootID = uuid.MustParse("5568143b-b80b-452d-ba1b-f9d333a06e7a")
+	rootID  = uuid.MustParse("5568143b-b80b-452d-ba1b-f9d333a06e7a")
 	trashID = uuid.MustParse("cf0008e9-9845-465b-8c9b-fa4b31b7f3bd")
 )
 
@@ -62,7 +68,7 @@ func NewTree(id int, serverIP string) *Tree {
 	tree.names[rootName] = rootID
 	tree.nodes[rootID] = &treeNode{id: rootID, name: rootName}
 	tree.root = tree.nodes[rootID]
-	
+
 	tree.names[trashName] = trashID
 	tree.nodes[trashID] = &treeNode{id: trashID, name: trashName}
 	tree.trash = tree.nodes[trashID]
@@ -103,12 +109,12 @@ func (this *Tree) truncateHistory() {
 	for _, t := range this.time {
 		time = Min(time, t)
 	}
-	
+
 	/* fmt.Println(this.time)
 	for _, v := range this.history {
 		fmt.Println(v)
 	}*/
-	
+
 	start := HistoryUpperBound(this.history, time)
 	this.history = this.history[start:]
 	// log.Printf("History truncated to %d\n", len(this.history))
@@ -158,12 +164,12 @@ func (this *Tree) apply(op Operation) {
 		if !ok {
 			log.Fatal("Parent does not exist:", op)
 		}
-		
+
 		this.names[op.Name] = op.Node
 		this.nodes[op.Node] = &treeNode{
-			id:       op.Node,
-			name:     op.Name,
-			parent:   parentPtr,
+			id:     op.Node,
+			name:   op.Name,
+			parent: parentPtr,
 		}
 		parentPtr.children = append(parentPtr.children, this.nodes[op.Node])
 	} else {
