@@ -8,6 +8,7 @@ Link: <https://martin.kleppmann.com/2021/10/07/crdt-tree-move-operation.html>
 
 - <https://github.com/google/uuid>
 - <https://github.com/vmihailenco/msgpack>
+- <https://github.com/eclipse/paho.golang> (Only needed with MQTT connection)
 
 ## App
 
