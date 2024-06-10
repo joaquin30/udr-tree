@@ -277,6 +277,8 @@ func (this *Tree) Move(node, newParent string) error {
 		return errors.New("Cannot move root")
 	} else if this.isDescendant(this.nodes[parentID], this.nodes[nodeID]) {
 		return errors.New("Cannot move node to one of its decendants")
+	} else if parentID == this.nodes[nodeID].parent.id {
+		return errors.New("New parent is already the parent of node")
 	}
 
 	op := Operation{

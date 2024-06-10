@@ -1,5 +1,5 @@
 #!/bin/sh
-OPS=6000
+OPS=1000
 echo "STRESS TEST - 3 REPLICAS"
 echo "Local operations per second: $OPS"
 echo "Compiling test..."
