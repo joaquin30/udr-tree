@@ -7,9 +7,10 @@
 package main
 
 import (
-	"os"
 	"log"
 	"net"
+	"os"
+
 	"github.com/vmihailenco/msgpack/v5"
 )
 
@@ -28,7 +29,7 @@ func main() {
 	if len(os.Args) != 2 {
 		log.Fatal("USE: ./causal-server [PORT]")
 	}
-	
+
 	ln, err := net.Listen("tcp", ":"+os.Args[1])
 	if err != nil {
 		panic(err)

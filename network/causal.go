@@ -1,6 +1,6 @@
 /*
  * This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * License, v. 2.0. If a copy of the MPL was not distributed with conn
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
 
@@ -9,6 +9,7 @@ package network
 import (
 	"net"
 	"sync"
+
 	// "log"
 	"github.com/vmihailenco/msgpack/v5"
 )
@@ -42,50 +43,50 @@ func NewCausalConn(tree CRDTTree, serverIP string) *CausalConn {
 	return &replica
 }
 
-func (this *CausalConn) Send(data []byte) {
-	this.toSend <- data
+func (conn *CausalConn) Send(data []byte) {
+	conn.toSend <- data
 }
 
-func (this *CausalConn) Disconnect() {
-	if this.connected {
-		this.connected = false
-		this.exit <- true
+func (conn *CausalConn) Disconnect() {
+	if conn.connected {
+		conn.connected = false
+		conn.exit <- true
 	}
 }
 
-func (this *CausalConn) Connect() {
-	if !this.connected {
-		this.connected = true
-		go this.processToSend()
+func (conn *CausalConn) Connect() {
+	if !conn.connected {
+		conn.connected = true
+		go conn.processToSend()
 	}
 }
 
-func (this *CausalConn) Close() {
-	close(this.toSend)
-	this.wg.Wait()
+func (conn *CausalConn) Close() {
+	close(conn.toSend)
+	conn.wg.Wait()
 }
 
-func (this *CausalConn) processToSend() {
-	this.wg.Add(1)
-	defer this.wg.Done()
+func (conn *CausalConn) processToSend() {
+	conn.wg.Add(1)
+	defer conn.wg.Done()
 
 	for {
 		select {
-		case data, ok := <-this.toSend:
+		case data, ok := <-conn.toSend:
 			if !ok {
 				return
 			}
 
-			this.conn.Write(data)
+			conn.conn.Write(data)
 
-		case <-this.exit:
+		case <-conn.exit:
 			return
 		}
 	}
 }
 
-func (this *CausalConn) receiveOperations() {
-	dec := msgpack.NewDecoder(this.conn)
+func (conn *CausalConn) receiveOperations() {
+	dec := msgpack.NewDecoder(conn.conn)
 	for {
 		data, err := dec.DecodeRaw()
 		if err != nil {
@@ -93,14 +94,14 @@ func (this *CausalConn) receiveOperations() {
 		}
 
 		//log.Println("RECV: " + string(data))
-		this.toApply <- data
+		conn.toApply <- data
 	}
 }
 
-func (this *CausalConn) processToApply(tree CRDTTree) {
+func (conn *CausalConn) processToApply(tree CRDTTree) {
 	for {
 		select {
-		case data := <-this.toApply:
+		case data := <-conn.toApply:
 			tree.ApplyRemoteOperation(data)
 		}
 	}

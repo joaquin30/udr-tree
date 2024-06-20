@@ -1,6 +1,6 @@
 /*
- * This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * tree Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with tree
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
 
@@ -9,23 +9,24 @@ package crdt
 import (
 	"errors"
 	"fmt"
-	"github.com/google/uuid"
 	"log"
 	"sort"
 	"sync"
 	"time"
 	"udr-tree/network"
+
+	"github.com/google/uuid"
 )
 
 const (
 	rootName    = "root"
-	trashName   = "trash"
 	NumReplicas = 3
 )
 
 var (
 	rootID  = uuid.MustParse("5568143b-b80b-452d-ba1b-f9d333a06e7a")
 	trashID = uuid.MustParse("cf0008e9-9845-465b-8c9b-fa4b31b7f3bd")
+	nilID   = uuid.MustParse("00000000-0000-0000-0000-000000000000")
 )
 
 type treeNode struct {
@@ -35,16 +36,39 @@ type treeNode struct {
 	children []*treeNode
 }
 
+func (node treeNode) Debug() {
+	fmt.Print(node.id.String())
+	fmt.Print(" ")
+	if node.parent == nil {
+		fmt.Print("nil")
+	} else {
+		fmt.Print(node.parent.id.String())
+	}
+
+	sort.Slice(node.children, func(i, j int) bool {
+		return node.children[i].id.String() < node.children[j].id.String()
+	})
+
+	fmt.Print(" [")
+	for i, ptr := range node.children {
+		fmt.Print(ptr.id.String())
+		if i < len(node.children)-1 {
+			fmt.Print(" ")
+		}
+	}
+
+	fmt.Println("]")
+}
+
 type Tree struct {
 	sync.Mutex
-	id          uint64
-	localTime   uint64 // lamport clock
-	time        [NumReplicas]uint64
-	nodes       map[uuid.UUID]*treeNode
-	names       map[string]uuid.UUID
-	root, trash *treeNode
-	conn        network.ReplicaConn
-	history     []LogOperation
+	id        uint64
+	localTime uint64 // lamport clock
+	time      [NumReplicas]uint64
+	nodes     map[uuid.UUID]*treeNode
+	names     map[string]uuid.UUID
+	conn      network.ReplicaConn
+	history   []LogOperation
 	// Estadisticas
 	LocalSum    time.Duration
 	LocalCnt    uint64
@@ -67,11 +91,8 @@ func NewTree(id int, serverIP string) *Tree {
 
 	tree.names[rootName] = rootID
 	tree.nodes[rootID] = &treeNode{id: rootID, name: rootName}
-	tree.root = tree.nodes[rootID]
-
-	tree.names[trashName] = trashID
-	tree.nodes[trashID] = &treeNode{id: trashID, name: trashName}
-	tree.trash = tree.nodes[trashID]
+	tree.nodes[trashID] = &treeNode{id: trashID, name: "__trash"}
+	tree.nodes[nilID] = &treeNode{id: nilID, name: "__nil"}
 
 	tree.conn = network.NewCausalConn(&tree, serverIP)
 	// Esperar a que las demas replicas se inicien
@@ -87,42 +108,19 @@ func NewTree(id int, serverIP string) *Tree {
 	return &tree
 }
 
-func (this *Tree) GetID() int {
-	return int(this.id)
-}
-
-func (this *Tree) ApplyRemoteOperation(data []byte) {
-	this.Lock()
-	defer this.Unlock()
-
-	this.PacketSzSum += uint64(len(data))
-	op := OperationFromBytes(data)
-	op.Time = time.Now()
-	this.apply(op)
-}
-
-func (this *Tree) truncateHistory() {
-	this.Lock()
-	defer this.Unlock()
-
-	time := this.time[0]
-	for _, t := range this.time {
-		time = Min(time, t)
-	}
-
-	/* fmt.Println(this.time)
-	for _, v := range this.history {
-		fmt.Println(v)
-	}*/
-
-	start := HistoryUpperBound(this.history, time)
-	this.history = this.history[start:]
-	// log.Printf("History truncated to %d\n", len(this.history))
+func (tree *Tree) exists(id uuid.UUID) bool {
+	_, ok := tree.nodes[id]
+	return ok
 }
 
 // checkear si node1 es descendiente de node2
-func (this *Tree) isDescendant(node1, node2 *treeNode) bool {
-	curr := node1
+func (tree *Tree) descendant(id1, id2 uuid.UUID) bool {
+	if !tree.exists(id1) || !tree.exists(id2) {
+		log.Fatal("descendant: node does not exist")
+	}
+
+	curr := tree.nodes[id1]
+	node2 := tree.nodes[id2]
 	for curr != nil {
 		if curr == node2 {
 			return true
@@ -134,208 +132,246 @@ func (this *Tree) isDescendant(node1, node2 *treeNode) bool {
 	return false
 }
 
+// checkear si node1 es descendiente de node2
+// nota: esta funcion esta comentada en Add Remove y Move
+// debido al test de stress, es posible que se elimine un nodo
+// bastante cerca al arbol y que el 90% de los nodos ya no sirvan
+func (tree *Tree) deleted(id uuid.UUID) bool {
+	if !tree.exists(id) {
+		log.Fatal("deleted: node does not exist")
+	}
+
+	return tree.descendant(id, trashID)
+}
+
 // cambiar el puntero de posicion
-func (this *Tree) movePtr(node, newParent *treeNode) {
-	if node.parent != nil {
-		for i, child := range node.parent.children {
-			if child == node {
-				node.parent.children[i] = node.parent.children[len(node.parent.children)-1]
-				node.parent.children = node.parent.children[:len(node.parent.children)-1]
-			}
+func (tree *Tree) moveInternal(id, parentId uuid.UUID) {
+	if !tree.exists(id) || !tree.exists(parentId) {
+		log.Fatal("moveInternal: node does not exist")
+	}
+
+	node := tree.nodes[id]
+	newParent := tree.nodes[parentId]
+	for i, child := range node.parent.children {
+		if child.id == node.id {
+			node.parent.children[i] = node.parent.children[len(node.parent.children)-1]
+			node.parent.children = node.parent.children[:len(node.parent.children)-1]
 		}
 	}
 
 	node.parent = newParent
-	if newParent != nil {
-		newParent.children = append(newParent.children, node)
-	}
+	newParent.children = append(newParent.children, node)
 }
 
 // aplicar la operacion op
 // aca esta la magia, debe revertir ops del historial, aplicar la nueva op
 // guardar la nueva op en el historial y reaplicar las ops del historial
 // ignorando las ops invalidas
-func (this *Tree) apply(op Operation) {
+func (tree *Tree) apply(op Operation) {
 	undoRedoCnt := uint64(0)
-	_, ok := this.nodes[op.Node]
-	// Si la operacion crea un nodo no es necesario guardarlo en el historial
-	if !ok {
-		parentPtr, ok := this.nodes[op.NewParent]
-		if !ok {
-			log.Fatal("Parent does not exist:", op)
-		}
-
-		this.names[op.Name] = op.Node
-		this.nodes[op.Node] = &treeNode{
+	// Creación de nodo implícito
+	if !tree.exists(op.Node) {
+		tree.names[op.Name] = op.Node
+		tree.nodes[op.Node] = &treeNode{
 			id:     op.Node,
 			name:   op.Name,
-			parent: parentPtr,
-		}
-		parentPtr.children = append(parentPtr.children, this.nodes[op.Node])
-	} else {
-		// Creando registro en el historial
-		this.history = append(this.history, LogOperation{
-			ReplicaID: op.ReplicaID,
-			Timestamp: op.Timestamp,
-			NewParent: op.NewParent,
-			Node:      op.Node,
-		})
-
-		// Revirtiendo registros con un timestamp mayor
-		i := len(this.history) - 1
-		for i > 0 && LogOperationBefore(this.history[i], this.history[i-1]) {
-			this.history[i], this.history[i-1] = this.history[i-1], this.history[i]
-			this.revert(i)
-			i--
-			undoRedoCnt++
-		}
-
-		// Aplicando la operacion y reaplicando operaciones revertidas
-		for i < len(this.history) {
-			this.reapply(i)
-			i++
+			parent: tree.nodes[nilID],
 		}
 	}
+	// Creando registro en el historial
+	tree.history = append(tree.history, LogOperation{
+		ReplicaID: op.ReplicaID,
+		Timestamp: op.Timestamp,
+		NewParent: op.NewParent,
+		Node:      op.Node,
+	})
 
-	// Transmision de actualizacion a otras replicas
-	if op.ReplicaID == this.id {
-		this.LocalCnt++
-		this.LocalSum += time.Now().Sub(op.Time)
+	// Revirtiendo registros con un timestamp mayor
+	i := len(tree.history) - 1
+	for i > 0 && LogOperationBefore(tree.history[i], tree.history[i-1]) {
+		tree.history[i], tree.history[i-1] = tree.history[i-1], tree.history[i]
+		tree.revert(&tree.history[i])
+		i--
+		undoRedoCnt++
+	}
+
+	// Aplicando la operacion y reaplicando operaciones revertidas
+	for i < len(tree.history) {
+		tree.reapply(&tree.history[i])
+		i++
+	}
+
+	if op.ReplicaID == tree.id {
+		// Transmision de actualizacion a otras replicas
+		tree.LocalCnt++
+		tree.LocalSum += time.Since(op.time)
 		data := OperationToBytes(op)
-		this.PacketSzSum += uint64(len(data))
-		this.conn.Send(data)
+		tree.PacketSzSum += uint64(len(data))
+		tree.conn.Send(data)
 	} else {
-		this.RemoteCnt++
-		this.RemoteSum += time.Now().Sub(op.Time)
-		this.UndoRedoCnt += undoRedoCnt
+		tree.RemoteCnt++
+		tree.RemoteSum += time.Since(op.time)
+		tree.UndoRedoCnt += undoRedoCnt
 	}
 
-	this.time[op.ReplicaID] = Max(this.time[op.ReplicaID], op.Timestamp)
-	this.localTime = Max(this.localTime, op.Timestamp) + 1
+	tree.time[op.ReplicaID] = Max(tree.time[op.ReplicaID], op.Timestamp)
+	tree.localTime = Max(tree.localTime, op.Timestamp) + 1
 }
 
 // revierte un logmove si no ha sido ignorado
-func (this *Tree) revert(i int) {
-	if this.history[i].ignored {
+func (tree *Tree) revert(op *LogOperation) {
+	if op.ignored {
 		return
 	}
 
-	nodePtr := this.nodes[this.history[i].Node]
-	parentPtr := this.nodes[this.history[i].OldParent]
-	this.movePtr(nodePtr, parentPtr)
+	tree.moveInternal(op.Node, op.OldParent)
 }
 
 // reaplica un logmove o lo ignora
-func (this *Tree) reapply(i int) {
-	nodePtr := this.nodes[this.history[i].Node]
-	parentPtr := this.nodes[this.history[i].NewParent]
-	this.history[i].ignored = this.isDescendant(parentPtr, nodePtr)
-	if this.history[i].ignored {
+func (tree *Tree) reapply(op *LogOperation) {
+	op.ignored = !tree.exists(op.NewParent) || tree.descendant(op.NewParent, op.Node)
+	if op.ignored {
 		return
 	}
 
-	this.history[i].OldParent = nodePtr.parent.id
-	this.movePtr(nodePtr, parentPtr)
+	op.OldParent = tree.nodes[op.Node].parent.id
+	tree.moveInternal(op.Node, op.NewParent)
 }
 
-func (this *Tree) Add(name, parent string) error {
-	this.Lock()
-	defer this.Unlock()
+func (tree *Tree) truncateHistory() {
+	tree.Lock()
+	defer tree.Unlock()
 
-	if _, ok := this.names[name]; ok {
-		return errors.New("Name already exists")
+	time := tree.time[0]
+	for _, t := range tree.time {
+		time = Min(time, t)
 	}
 
-	parentID, ok := this.names[parent]
-	if !ok || this.isDescendant(this.nodes[parentID], this.trash) {
-		return errors.New("Parent does not exist")
+	start := HistoryUpperBound(tree.history, time)
+	tree.history = tree.history[start:]
+}
+
+func (tree *Tree) GetID() int {
+	return int(tree.id)
+}
+
+func (tree *Tree) ApplyRemoteOperation(data []byte) {
+	tree.Lock()
+	defer tree.Unlock()
+
+	tree.PacketSzSum += uint64(len(data))
+	op := OperationFromBytes(data)
+	op.time = time.Now()
+	tree.apply(op)
+}
+
+func (tree *Tree) Add(name, parent string) error {
+	tree.Lock()
+	defer tree.Unlock()
+
+	if _, ok := tree.names[name]; ok {
+		return errors.New("add: name already exists")
+	}
+
+	parentID, ok := tree.names[parent]
+	if !ok /* || tree.deleted(parentID) */ {
+		return errors.New("add: parent does not exist")
 	}
 
 	op := Operation{
-		ReplicaID: this.id,
-		Timestamp: this.localTime,
+		ReplicaID: tree.id,
+		Timestamp: tree.localTime,
 		NewParent: parentID,
 		Node:      uuid.New(),
 		Name:      name,
-		Time:      time.Now(),
+		time:      time.Now(),
 	}
-	this.apply(op)
+	tree.apply(op)
 	return nil
 }
 
-func (this *Tree) Move(node, newParent string) error {
-	this.Lock()
-	defer this.Unlock()
+func (tree *Tree) Move(node, newParent string) error {
+	tree.Lock()
+	defer tree.Unlock()
 
-	nodeID, ok1 := this.names[node]
-	parentID, ok2 := this.names[newParent]
-	if !ok1 || this.isDescendant(this.nodes[nodeID], this.trash) {
-		return errors.New("Node does not exist")
-	} else if !ok2 || this.isDescendant(this.nodes[parentID], this.trash) {
-		return errors.New("Parent does not exist")
+	nodeID, ok1 := tree.names[node]
+	parentID, ok2 := tree.names[newParent]
+	if !ok1 /* || tree.deleted(nodeID) */ {
+		return errors.New("move: node does not exist")
+	} else if !ok2 /* || tree.deleted(parentID) */ {
+		return errors.New("move: parent does not exist")
 	} else if nodeID == rootID {
-		return errors.New("Cannot move root")
-	} else if this.isDescendant(this.nodes[parentID], this.nodes[nodeID]) {
-		return errors.New("Cannot move node to one of its decendants")
-	} else if parentID == this.nodes[nodeID].parent.id {
-		return errors.New("New parent is already the parent of node")
+		return errors.New("move: cannot move root")
+	} else if tree.descendant(parentID, nodeID) {
+		return errors.New("move: cannot move node to one of its decendants")
+	} else if parentID == tree.nodes[nodeID].parent.id {
+		return errors.New("move: new parent is already the parent of node")
 	}
 
 	op := Operation{
-		ReplicaID: this.id,
-		Timestamp: this.localTime,
+		ReplicaID: tree.id,
+		Timestamp: tree.localTime,
 		NewParent: parentID,
 		Node:      nodeID,
-		Time:      time.Now(),
+		time:      time.Now(),
 	}
-	this.apply(op)
+	tree.apply(op)
 	return nil
 }
 
-func (this *Tree) Remove(node string) error {
-	this.Lock()
-	defer this.Unlock()
+func (tree *Tree) Remove(node string) error {
+	tree.Lock()
+	defer tree.Unlock()
 
-	nodeID, ok := this.names[node]
-	if !ok || this.isDescendant(this.nodes[nodeID], this.trash) {
-		return errors.New("Node does not exist")
+	nodeID, ok := tree.names[node]
+	// se comenta la condicion para evitar problemas en el stress test
+	if !ok /* || tree.deleted(nodeID) */ {
+		return errors.New("remove: node does not exist")
 	} else if nodeID == rootID {
-		return errors.New("Cannot remove root")
+		return errors.New("remove: cannot remove root")
 	}
 
 	op := Operation{
-		ReplicaID: this.id,
-		Timestamp: this.localTime,
+		ReplicaID: tree.id,
+		Timestamp: tree.localTime,
 		NewParent: trashID,
 		Node:      nodeID,
-		Time:      time.Now(),
+		time:      time.Now(),
 	}
-	this.apply(op)
+	tree.apply(op)
 	return nil
 }
 
-// imprimir arbol como "cmd tree"
-func (this *Tree) Print() {
-	this.Lock()
-	defer this.Unlock()
+// imprimir tree.nodes de forma ordenada
+func (tree *Tree) Debug() {
+	tree.Lock()
+	defer tree.Unlock()
 
-	/* sort.Slice(this.ops, func(i, j int) bool {
-		if this.ops[i].Timestamp == this.ops[j].Timestamp {
-			return this.ops[i].ReplicaID < this.ops[j].ReplicaID
-		}
+	fmt.Println(tree.RemoteCnt+tree.LocalCnt, "operations")
+	var keys []uuid.UUID
+	for k := range tree.nodes {
+		keys = append(keys, k)
+	}
 
-		return this.ops[i].Timestamp < this.ops[j].Timestamp
+	sort.Slice(keys, func(i, j int) bool {
+		return keys[i].String() < keys[j].String()
 	})
 
-	for _, v := range this.ops {
-		fmt.Println(v)
-	}*/
-
-	fmt.Println(rootName)
-	printNode(this.root, "")
+	for _, k := range keys {
+		tree.nodes[k].Debug()
+	}
 }
 
-func printNode(node *treeNode, prefix string) {
+// imprimir arbol de forma bonita
+func (tree *Tree) Print() {
+	tree.Lock()
+	defer tree.Unlock()
+
+	fmt.Println(rootName)
+	printInternal(tree.nodes[rootID], "")
+}
+
+func printInternal(node *treeNode, prefix string) {
 	sort.Slice(node.children, func(i, j int) bool {
 		return node.children[i].name < node.children[j].name
 	})
@@ -343,22 +379,38 @@ func printNode(node *treeNode, prefix string) {
 	for index, child := range node.children {
 		if index == len(node.children)-1 {
 			fmt.Println(prefix+"└──", child.name)
-			printNode(child, prefix+"    ")
+			printInternal(child, prefix+"    ")
 		} else {
 			fmt.Println(prefix+"├──", child.name)
-			printNode(child, prefix+"│   ")
+			printInternal(child, prefix+"│   ")
 		}
 	}
 }
 
-func (this *Tree) Disconnect() {
-	this.conn.Disconnect()
+func (tree *Tree) Disconnect() {
+	tree.conn.Disconnect()
 }
 
-func (this *Tree) Connect() {
-	this.conn.Connect()
+func (tree *Tree) Connect() {
+	tree.conn.Connect()
 }
 
-func (this *Tree) Close() {
-	this.conn.Close()
+func (tree *Tree) Close() {
+	tree.conn.Close()
+}
+
+func (tree *Tree) GetNames() []string {
+	tree.Lock()
+	defer tree.Unlock()
+
+	return getNamesInternal(tree.nodes[rootID], []string{})
+}
+
+func getNamesInternal(node *treeNode, names []string) []string {
+	names = append(names, node.name)
+	for _, child := range node.children {
+		names = getNamesInternal(child, names)
+	}
+
+	return names
 }

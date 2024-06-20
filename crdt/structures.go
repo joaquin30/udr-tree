@@ -7,10 +7,11 @@
 package crdt
 
 import (
-	"github.com/google/uuid"
-	"github.com/vmihailenco/msgpack/v5"
 	"log"
 	"time"
+
+	"github.com/google/uuid"
+	"github.com/vmihailenco/msgpack/v5"
 )
 
 type Operation struct {
@@ -22,7 +23,7 @@ type Operation struct {
 	NewParent uuid.UUID
 	Node      uuid.UUID
 	Name      string
-	Time      time.Time
+	time      time.Time
 }
 
 // Se usa MessagePack para serializar las operaciones

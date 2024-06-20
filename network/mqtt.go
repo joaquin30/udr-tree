@@ -8,8 +8,6 @@ package network
 
 import (
 	"context"
-	"github.com/eclipse/paho.golang/autopaho"
-	"github.com/eclipse/paho.golang/paho"
 	"log"
 	"net/url"
 	"os"
@@ -17,6 +15,9 @@ import (
 	"strconv"
 	"sync"
 	"syscall"
+
+	"github.com/eclipse/paho.golang/autopaho"
+	"github.com/eclipse/paho.golang/paho"
 )
 
 const (
@@ -34,16 +35,19 @@ type MQTTConn struct {
 	conn      *autopaho.ConnectionManager
 }
 
+// Este es un intento antiguo de lograr orden causal entre mensajes
+// Ya no es necesario porque tiene mas latencia que CausalConn
+// pero se queda ya que trabaje un monton
 func NewMQTTConn(tree CRDTTree, serverIP string) *MQTTConn {
 	replica := MQTTConn{
-		queue:     make(chan []byte, 1000000),
+		queue:     make(chan []byte, 100000),
 		exit:      make(chan bool),
 		connected: true,
 	}
 	// App will run until cancelled by user (e.g. ctrl-c)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 
-	// We will connect to the Eclipse test server (note that you may see messages that other users publish)
+	// We will connect to the Eclipse test conn (note that you may see messages that other users publish)
 	u, err := url.Parse(serverIP)
 	if err != nil {
 		panic(err)
@@ -59,7 +63,7 @@ func NewMQTTConn(tree CRDTTree, serverIP string) *MQTTConn {
 
 		// SessionExpiryInterval - Seconds that a session will survive after disconnection.
 		// It is important to set this because otherwise, any queued messages will be lost if the connection drops and
-		// the server will not queue messages while it is down. The specific setting will depend upon your needs
+		// the conn will not queue messages while it is down. The specific setting will depend upon your needs
 		// (60 = 1 minute, 3600 = 1 hour, 86400 = one day, 0xFFFFFFFE = 136 years, 0xFFFFFFFF = don't expire)
 		SessionExpiryInterval: 60,
 
@@ -123,53 +127,53 @@ func NewMQTTConn(tree CRDTTree, serverIP string) *MQTTConn {
 	return &replica
 }
 
-func (this *MQTTConn) Send(data []byte) {
-	this.queue <- data
+func (conn *MQTTConn) Send(data []byte) {
+	conn.queue <- data
 }
 
-func (this *MQTTConn) Disconnect() {
-	if this.connected {
-		this.connected = false
-		this.exit <- true
+func (conn *MQTTConn) Disconnect() {
+	if conn.connected {
+		conn.connected = false
+		conn.exit <- true
 	}
 }
 
-func (this *MQTTConn) Connect() {
-	if !this.connected {
-		this.connected = true
-		go this.update()
+func (conn *MQTTConn) Connect() {
+	if !conn.connected {
+		conn.connected = true
+		go conn.update()
 	}
 }
 
-func (this *MQTTConn) Close() {
-	close(this.queue)
-	this.wg.Wait()
-	// this.stop()
+func (conn *MQTTConn) Close() {
+	close(conn.queue)
+	conn.wg.Wait()
+	// conn.stop()
 }
 
-func (this *MQTTConn) update() {
-	this.wg.Add(1)
-	defer this.wg.Done()
+func (conn *MQTTConn) update() {
+	conn.wg.Add(1)
+	defer conn.wg.Done()
 
 	for {
 		select {
-		case msg, ok := <-this.queue:
+		case msg, ok := <-conn.queue:
 			if !ok {
 				return
 			}
 
 			// Publish a test message (use PublishViaQueue if you don't want to wait for a response)
-			if _, err := this.conn.Publish(this.ctx, &paho.Publish{
+			if _, err := conn.conn.Publish(conn.ctx, &paho.Publish{
 				QoS:     qosLevel,
 				Topic:   topic,
 				Payload: msg,
 			}); err != nil {
-				if this.ctx.Err() == nil {
+				if conn.ctx.Err() == nil {
 					panic(err) // Publish will exit when context cancelled or if something went wrong
 				}
 			}
 
-		case <-this.exit:
+		case <-conn.exit:
 			return
 		}
 	}
