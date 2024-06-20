@@ -31,7 +31,7 @@ func OperationFromBytes(data []byte) Operation {
 	var op Operation
 	err := msgpack.Unmarshal(data, &op)
 	if err != nil {
-		log.Println("Error decoding MessagePack")
+		log.Println("error decoding MessagePack")
 		log.Println(string(data))
 		log.Fatal(err)
 	}

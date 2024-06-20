@@ -18,6 +18,11 @@ import (
 	"udr-tree/crdt"
 )
 
+var (
+	errInvalid  = errors.New("invalid command")
+	errNotFound = errors.New("command not found")
+)
+
 func main() {
 	helpMessage := `COMMANDS
   add [name] [parent]	Add new node [name] to be child of [parent]
@@ -58,19 +63,19 @@ func main() {
 			if len(cmd) >= 3 {
 				err = tree.Add(cmd[1], cmd[2])
 			} else {
-				err = errors.New("Invalid command")
+				err = errInvalid
 			}
 		case "rm":
 			if len(cmd) >= 2 {
 				err = tree.Remove(cmd[1])
 			} else {
-				err = errors.New("Invalid command")
+				err = errInvalid
 			}
 		case "mv":
 			if len(cmd) >= 3 {
 				err = tree.Move(cmd[1], cmd[2])
 			} else {
-				err = errors.New("Invalid command")
+				err = errInvalid
 			}
 		case "print":
 			tree.Print()
@@ -84,7 +89,7 @@ func main() {
 		case "help":
 			fmt.Println(helpMessage)
 		default:
-			err = errors.New("Command not found")
+			err = errNotFound
 		}
 
 		if err != nil {
