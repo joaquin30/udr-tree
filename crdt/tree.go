@@ -24,9 +24,7 @@ const (
 )
 
 var (
-	rootID  = uuid.MustParse("5568143b-b80b-452d-ba1b-f9d333a06e7a")
-	trashID = uuid.MustParse("cf0008e9-9845-465b-8c9b-fa4b31b7f3bd")
-	nilID   = uuid.MustParse("00000000-0000-0000-0000-000000000000")
+	rootID = uuid.MustParse("5568143b-b80b-452d-ba1b-f9d333a06e7a")
 )
 
 type treeNode struct {
@@ -34,6 +32,7 @@ type treeNode struct {
 	name     string
 	parent   *treeNode
 	children []*treeNode
+	deleted  bool
 }
 
 func (node treeNode) Debug() {
@@ -56,8 +55,7 @@ func (node treeNode) Debug() {
 			fmt.Print(" ")
 		}
 	}
-
-	fmt.Println("]")
+	fmt.Print("]")
 }
 
 type Tree struct {
@@ -91,8 +89,6 @@ func NewTree(id int, serverIP string) *Tree {
 
 	tree.names[rootName] = rootID
 	tree.nodes[rootID] = &treeNode{id: rootID, name: rootName}
-	tree.nodes[trashID] = &treeNode{id: trashID, name: "__trash"}
-	tree.nodes[nilID] = &treeNode{id: nilID, name: "__nil"}
 
 	tree.conn = network.NewCausalConn(&tree, serverIP)
 	// Esperar a que las demas replicas se inicien
@@ -133,15 +129,24 @@ func (tree *Tree) descendant(id1, id2 uuid.UUID) bool {
 }
 
 // checkear si node1 es descendiente de node2
-// nota: esta funcion esta comentada en Add Remove y Move
-// debido al test de stress, es posible que se elimine un nodo
+// nota: esta funcion es comentada en Add Remove y Move
+// en el test de stress, ya que es posible que se elimine un nodo
 // bastante cerca al arbol y que el 90% de los nodos ya no sirvan
 func (tree *Tree) deleted(id uuid.UUID) bool {
 	if !tree.exists(id) {
 		log.Fatal("deleted: node does not exist")
 	}
 
-	return tree.descendant(id, trashID)
+	curr := tree.nodes[id]
+	for curr != nil {
+		if curr.deleted {
+			return true
+		} else {
+			curr = curr.parent
+		}
+	}
+
+	return false
 }
 
 // cambiar el puntero de posicion
@@ -169,36 +174,61 @@ func (tree *Tree) moveInternal(id, parentId uuid.UUID) {
 // ignorando las ops invalidas
 func (tree *Tree) apply(op Operation) {
 	undoRedoCnt := uint64(0)
-	// Creación de nodo implícito
-	if !tree.exists(op.Node) {
+
+	switch op.OpType {
+	case opAdd:
+		// Si no existe el padre hay un error en la capa causal de entrega
+		if !tree.exists(op.NewParent) {
+			log.Fatal("apply: add operation, parent does not exist")
+		}
+
+		if tree.exists(op.Node) {
+			log.Fatal("apply: add operation, node already exists")
+		}
+
+		ptr := tree.nodes[op.NewParent]
 		tree.names[op.Name] = op.Node
 		tree.nodes[op.Node] = &treeNode{
 			id:     op.Node,
 			name:   op.Name,
-			parent: tree.nodes[nilID],
+			parent: ptr,
 		}
-	}
-	// Creando registro en el historial
-	tree.history = append(tree.history, LogOperation{
-		ReplicaID: op.ReplicaID,
-		Timestamp: op.Timestamp,
-		NewParent: op.NewParent,
-		Node:      op.Node,
-	})
+		ptr.children = append(ptr.children, tree.nodes[op.Node])
 
-	// Revirtiendo registros con un timestamp mayor
-	i := len(tree.history) - 1
-	for i > 0 && LogOperationBefore(tree.history[i], tree.history[i-1]) {
-		tree.history[i], tree.history[i-1] = tree.history[i-1], tree.history[i]
-		tree.revert(&tree.history[i])
-		i--
-		undoRedoCnt++
-	}
+	case opRemove:
+		// Si no existe el nodo hay un error en la capa causal de entrega
+		if !tree.exists(op.Node) {
+			log.Fatal("apply: remove operation, node does not exist")
+		}
 
-	// Aplicando la operacion y reaplicando operaciones revertidas
-	for i < len(tree.history) {
-		tree.reapply(&tree.history[i])
-		i++
+		tree.nodes[op.Node].deleted = true
+
+	case opMove:
+		// Creando registro en el historial
+		tree.history = append(tree.history, LogOperation{
+			ReplicaID: op.ReplicaID,
+			Timestamp: op.Timestamp,
+			NewParent: op.NewParent,
+			Node:      op.Node,
+		})
+
+		// Revirtiendo registros con un timestamp mayor
+		i := len(tree.history) - 1
+		for i > 0 && LogOperationBefore(tree.history[i], tree.history[i-1]) {
+			tree.history[i], tree.history[i-1] = tree.history[i-1], tree.history[i]
+			tree.revert(&tree.history[i])
+			i--
+			undoRedoCnt++
+		}
+
+		// Aplicando la operacion y reaplicando operaciones revertidas
+		for i < len(tree.history) {
+			tree.reapply(&tree.history[i])
+			i++
+		}
+
+	default:
+		log.Fatal("apply: operation type not implemented")
 	}
 
 	if op.ReplicaID == tree.id {
@@ -274,11 +304,12 @@ func (tree *Tree) Add(name, parent string) error {
 	}
 
 	parentID, ok := tree.names[parent]
-	if !ok /* || tree.deleted(parentID) */ {
+	if !ok || tree.deleted(parentID) {
 		return errors.New("add: parent does not exist")
 	}
 
 	op := Operation{
+		OpType:    opAdd,
 		ReplicaID: tree.id,
 		Timestamp: tree.localTime,
 		NewParent: parentID,
@@ -296,9 +327,9 @@ func (tree *Tree) Move(node, newParent string) error {
 
 	nodeID, ok1 := tree.names[node]
 	parentID, ok2 := tree.names[newParent]
-	if !ok1 /* || tree.deleted(nodeID) */ {
+	if !ok1 || tree.deleted(nodeID) {
 		return errors.New("move: node does not exist")
-	} else if !ok2 /* || tree.deleted(parentID) */ {
+	} else if !ok2 || tree.deleted(parentID) {
 		return errors.New("move: parent does not exist")
 	} else if nodeID == rootID {
 		return errors.New("move: cannot move root")
@@ -309,6 +340,7 @@ func (tree *Tree) Move(node, newParent string) error {
 	}
 
 	op := Operation{
+		OpType:    opMove,
 		ReplicaID: tree.id,
 		Timestamp: tree.localTime,
 		NewParent: parentID,
@@ -324,17 +356,16 @@ func (tree *Tree) Remove(node string) error {
 	defer tree.Unlock()
 
 	nodeID, ok := tree.names[node]
-	// se comenta la condicion para evitar problemas en el stress test
-	if !ok /* || tree.deleted(nodeID) */ {
+	if !ok || tree.deleted(nodeID) {
 		return errors.New("remove: node does not exist")
 	} else if nodeID == rootID {
 		return errors.New("remove: cannot remove root")
 	}
 
 	op := Operation{
+		OpType:    opRemove,
 		ReplicaID: tree.id,
 		Timestamp: tree.localTime,
-		NewParent: trashID,
 		Node:      nodeID,
 		time:      time.Now(),
 	}
@@ -359,6 +390,7 @@ func (tree *Tree) Debug() {
 
 	for _, k := range keys {
 		tree.nodes[k].Debug()
+		fmt.Printf(" %v\n", tree.deleted(k))
 	}
 }
 

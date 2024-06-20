@@ -14,10 +14,17 @@ import (
 	"github.com/vmihailenco/msgpack/v5"
 )
 
+const (
+	opAdd    = 0
+	opRemove = 1
+	opMove   = 2
+)
+
 type Operation struct {
 	// Para omitir campos en blanco
 	_msgpack struct{} `msgpack:",omitempty"`
 
+	OpType    uint8
 	ReplicaID uint64
 	Timestamp uint64
 	NewParent uuid.UUID

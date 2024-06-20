@@ -50,7 +50,7 @@ func GenerateLoad(tree *crdt.Tree) {
 	start := time.Now()
 	log.Println("Start")
 	nodes := []string{"root"}
-	for t := 0; t < MaxN; t++ {
+	for t := 0; t < 33; t++ {
 		i := rand.Intn(len(nodes))
 		name := uuid.New().String()
 		tree.Add(name, nodes[i])
@@ -68,7 +68,7 @@ func GenerateLoad(tree *crdt.Tree) {
 
 		if cnt%50 == 0 {
 			tree.Connect()
-			time.Sleep(1000 * time.Millisecond)
+			time.Sleep(time.Second)
 			tree.Disconnect()
 		}
 
