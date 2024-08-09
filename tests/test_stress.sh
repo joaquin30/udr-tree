@@ -1,5 +1,10 @@
 #!/bin/sh
-OPS=7000
+if [ $# -ne 1 ]; then
+	echo "USE: ./test_stress [op_rate]"
+	exit 1
+fi
+
+OPS=$1
 echo "STRESS TEST - 3 REPLICAS"
 echo "Local operations per second: $OPS"
 echo "Compiling test..."

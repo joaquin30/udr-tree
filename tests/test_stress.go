@@ -18,10 +18,6 @@ import (
 	"github.com/google/uuid"
 )
 
-const (
-	total = 120
-)
-
 var (
 	nodes = []string{"root"}
 )
@@ -45,66 +41,63 @@ func main() {
 	tree := crdt.NewTree(id, os.Args[2])
 	GenerateNodes(tree)
 	go func() {
-		time.Sleep(total * time.Second)
-		log.Println("\n\tSeconds running:", total,
-			// "\n\tOperations per second:", (tree.LocalCnt+tree.RemoteCnt)/total,
-			"\n\tAvg delay for local operation:", tree.LocalSum/time.Duration(tree.LocalCnt),
-			"\n\tAvg delay for remote operation:", tree.RemoteSum/time.Duration(tree.RemoteCnt),
-			"\n\tAvg undo and redos for remote operation:", tree.UndoRedoCnt/tree.RemoteCnt,
-			"\n\tAvg bandwidth consumption:", tree.PacketSzSum/total, "bps")
+		time.Sleep(120 * time.Second)
 		os.Exit(0)
 	}()
 	GenerateLoad(tree, ops)
+	time.Sleep(10 * time.Second)
+	log.Println("\n\tTotal time:", tree.LocalSum+tree.RemoteSum,
+		"\n\tLocal operations:", tree.LocalCnt,
+		"\n\tRemote operations:", tree.RemoteCnt,
+		"\n\tAvg delay for local operation:", tree.LocalSum/time.Duration(tree.LocalCnt),
+		"\n\tAvg delay for remote operation:", tree.RemoteSum/time.Duration(tree.RemoteCnt),
+		"\n\tAvg undo and redos for remote operation:", tree.UndoRedoCnt/tree.RemoteCnt,
+		"\n\tAvg packet size:", tree.PacketSzSum/(tree.LocalCnt+tree.RemoteCnt), "bytes")
 }
 
 func GenerateNodes(tree *crdt.Tree) {
-	for t := 0; t < 33; t++ {
+	for t := 0; t < 333; t++ {
 		i := rand.Intn(len(nodes))
 		name := uuid.New().String()
 		nodes = append(nodes, name)
 		tree.Add(name, nodes[i])
 	}
 
-	time.Sleep(5 * time.Second)
+	time.Sleep(10 * time.Second)
 	nodes = tree.GetNames()
 	tree.LocalCnt = 0
 	tree.LocalSum = 0
 	tree.RemoteCnt = 0
 	tree.RemoteSum = 0
 	tree.PacketSzSum = 0
-	log.Printf("Generated %d nodes\n", len(nodes))
+	log.Println("Generated nodes:", len(nodes))
 }
 
 func GenerateLoad(tree *crdt.Tree, ops int) {
-	rate := time.Second / time.Duration(ops)
-	previous := time.Now()
-	var delay time.Duration
-	for {
-		current := time.Now()
-		delay += current.Sub(previous)
-		previous = current
-
-		for delay >= rate {
-			// Se hacen las operaciones con un
-			// 33.33% de probabilidad cada una
-			x := rand.Intn(3)
-			if len(nodes) <= 1 || x == 0 {
-				i := rand.Intn(len(nodes))
-				name := uuid.New().String()
-				nodes = append(nodes, name)
-				tree.Add(name, nodes[i])
-			} else if x == 1 {
-				i := rand.Intn(len(nodes)-1) + 1
-				j := rand.Intn(len(nodes)-1) + 1
-				tree.Move(nodes[i], nodes[j])
-			} else {
-				i := rand.Intn(len(nodes)-1) + 1
-				tree.Remove(nodes[i])
-				nodes[i] = nodes[len(nodes)-1]
-				nodes = nodes[:len(nodes)-1]
-			}
-
-			delay -= rate
+	for t := 0; t < ops; t++ {
+		// Se hacen las operaciones con un
+		// 33.33% de probabilidad cada una
+		x := rand.Intn(3)
+		if len(nodes) <= 1 || x == 0 {
+			i := rand.Intn(len(nodes))
+			name := uuid.New().String()
+			nodes = append(nodes, name)
+			log.Println("add start", t)
+			tree.Add(name, nodes[i])
+			log.Println("add end", t)
+		} else if x == 1 {
+			i := rand.Intn(len(nodes)-1) + 1
+			j := rand.Intn(len(nodes)-1) + 1
+			log.Println("mv start", t)
+			tree.Move(nodes[i], nodes[j])
+			log.Println("mv end", t)
+		} else {
+			i := rand.Intn(len(nodes)-1) + 1
+			log.Println("rm start", t)
+			tree.Remove(nodes[i])
+			log.Println("rm end", t)
+			nodes[i] = nodes[len(nodes)-1]
+			nodes = nodes[:len(nodes)-1]
 		}
 	}
 }
